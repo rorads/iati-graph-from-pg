@@ -1,0 +1,17 @@
+[project]
+name = "iati-graph-from-pg"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dbt-adapters>=1.14.6",
+    "dbt-common>=1.18",
+    "dbt-core>=1.9.4",
+    "dbt-extractor>=0.6.0",
+    "dbt-postgres>=1.9.0",
+    "dbt-semantic-interfaces>=0.7.4",
+    "neo4j>=5.28.1",
+    "psycopg2-binary>=2.9.10",
+    "tqdm>=4.67.1",
+]

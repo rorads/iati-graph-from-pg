@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: postgres_db
+    environment:
+      POSTGRES_PASSWORD: your_postgres_password  # Please change this password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  neo4j:
+    image: neo4j:latest
+    container_name: neo4j_db
+    environment:
+      NEO4J_AUTH: neo4j/your_neo4j_password  # Please change this password
+      NEO4JLABS_PLUGINS: '["apoc"]' # Installs the APOC plugin
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: 'yes' # Required for Enterprise features if using Enterprise Edition, harmless otherwise
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/plugins
+      - neo4j_config:/config # Optional: Mount if you need custom neo4j.conf
+    restart: always
+
+volumes:
+  postgres_data:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_plugins:
+  neo4j_config: 
