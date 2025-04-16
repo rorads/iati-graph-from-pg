@@ -5,7 +5,7 @@ services:
     image: postgres:latest
     container_name: postgres_db
     environment:
-      POSTGRES_PASSWORD: your_postgres_password  # Please change this password
+      POSTGRES_PASSWORD: dev_password  # Please change this password
     ports:
       - "5432:5432"
     volumes:
@@ -16,7 +16,7 @@ services:
     image: neo4j:latest
     container_name: neo4j_db
     environment:
-      NEO4J_AUTH: neo4j/your_neo4j_password  # Please change this password
+      NEO4J_AUTH: neo4j/dev_password  # Please change this password
       NEO4JLABS_PLUGINS: '["apoc"]' # Installs the APOC plugin
       NEO4J_ACCEPT_LICENSE_AGREEMENT: 'yes' # Required for Enterprise features if using Enterprise Edition, harmless otherwise
     ports:
