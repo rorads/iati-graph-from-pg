@@ -218,15 +218,32 @@ def load_participation_edges(pg_conn, neo4j_driver, batch_size):
     """Loads participation edges from PostgreSQL to Neo4j."""
     print(f"--- Loading Edges: {DBT_TARGET_SCHEMA}.{SOURCE_TABLE} -> :{NEO4J_EDGE_TYPE} ---")
 
+    summary_log_filename = "participation_edges_skipped_summary.log"
+
     # Add this near the beginning with pg_conn parameter
     check_node_existence(neo4j_driver, pg_conn)
     
+    # Initialize counters
+    skipped_null_id_count = 0
+    skipped_missing_node_count = 0 # This will now count skips identified by Neo4j during merge
+
     # 1. Get expected count from PostgreSQL
     expected_count = get_pg_count(pg_conn, DBT_TARGET_SCHEMA, SOURCE_TABLE)
-    if expected_count is None: return False
+    if expected_count is None: return False, 0, 0 # Indicate failure, return counts
     if expected_count == 0:
         print(f"Skipping edge loading - no rows found in {DBT_TARGET_SCHEMA}.{SOURCE_TABLE}.")
-        return True
+        # Write empty summary file
+        try:
+            with open(summary_log_filename, 'w') as f:
+                f.write(f"Skipped edge summary for {NEO4J_EDGE_TYPE}\n")
+                f.write(f"Source: {DBT_TARGET_SCHEMA}.{SOURCE_TABLE}\n")
+                f.write("No rows found in source table.\n")
+                f.write("Skipped due to NULL IDs: 0\n")
+                f.write("Skipped due to missing nodes (Neo4j): 0\n")
+            print(f"Skip summary written to {os.path.abspath(summary_log_filename)}")
+        except IOError as e:
+            print(f"Error writing summary log file: {e}", file=sys.stderr)
+        return True, 0, 0 # Indicate success, return counts
 
     # 2. Get current count from Neo4j (before loading)
     count_before = get_neo4j_edge_count(neo4j_driver, NEO4J_EDGE_TYPE)
@@ -241,50 +258,29 @@ def load_participation_edges(pg_conn, neo4j_driver, batch_size):
     select_query = f'SELECT {select_cols_str} FROM "{DBT_TARGET_SCHEMA}"."{SOURCE_TABLE}";'
 
     # 5. Prepare Cypher Query for Batch Loading
-    # Build SET clauses dynamically for edge properties
     set_clauses = []
     for col in EDGE_PROPERTY_COLUMNS:
-        # Basic sanitisation for property names (replace hyphens)
         prop_name = col.replace("-", "_")
-        # Use row[col] for accessing data in the batch map
         set_clauses.append(f"r.{prop_name} = row.{prop_name}")
-
     set_clause_str = ", ".join(set_clauses)
 
-    # Use MERGE for idempotency - first try published nodes, then phantom nodes if not found
     cypher_query = f"""
     UNWIND $batch as row
-    // First try to match with published organisation
-    OPTIONAL MATCH (org:{ORGANISATION_LABEL}) 
-    WHERE org.organisationidentifier = row.{SOURCE_NODE_ID}
-    
-    // First try to match with published activity
-    OPTIONAL MATCH (act:{ACTIVITY_LABEL}) 
-    WHERE act.iatiidentifier = row.{TARGET_NODE_ID}
-    
-    // If organisation not found, try phantom organisation
+    OPTIONAL MATCH (org:{ORGANISATION_LABEL}) WHERE org.organisationidentifier = row.{SOURCE_NODE_ID}
+    OPTIONAL MATCH (act:{ACTIVITY_LABEL}) WHERE act.iatiidentifier = row.{TARGET_NODE_ID}
     WITH row, org, act
-    OPTIONAL MATCH (phantomOrg:{PHANTOM_ORG_LABEL}) 
-    WHERE phantomOrg.reference = row.{SOURCE_NODE_ID} AND org IS NULL
-    
-    // If activity not found, try phantom activity
-    OPTIONAL MATCH (phantomAct:{PHANTOM_ACTIVITY_LABEL}) 
-    WHERE phantomAct.phantom_activity_identifier = row.{TARGET_NODE_ID} AND act IS NULL
-    
-    // Use the appropriate nodes (published or phantom)
+    OPTIONAL MATCH (phantomOrg:{PHANTOM_ORG_LABEL}) WHERE phantomOrg.reference = row.{SOURCE_NODE_ID} AND org IS NULL
+    OPTIONAL MATCH (phantomAct:{PHANTOM_ACTIVITY_LABEL}) WHERE phantomAct.phantom_activity_identifier = row.{TARGET_NODE_ID} AND act IS NULL
     WITH row, 
          CASE WHEN org IS NOT NULL THEN org ELSE phantomOrg END as sourceNode,
          CASE WHEN act IS NOT NULL THEN act ELSE phantomAct END as targetNode
-    
-    // Only create the relationship if both nodes exist
     WHERE sourceNode IS NOT NULL AND targetNode IS NOT NULL
-    
-    // Create the relationship
     MERGE (sourceNode)-[r:{NEO4J_EDGE_TYPE}]->(targetNode)
     ON CREATE SET {set_clause_str}
     ON MATCH SET {set_clause_str}
     RETURN count(r) as relationshipsCreated
     """
+
 
     # 6. Execute Loading in Batches
     print(f"Executing SELECT query: {select_query}")
@@ -297,12 +293,13 @@ def load_participation_edges(pg_conn, neo4j_driver, batch_size):
          elif "column" in str(e) and "does not exist" in str(e):
              print(f"Hint: A column in SOURCE_COLUMNS ({SOURCE_COLUMNS}) does not exist in '{DBT_TARGET_SCHEMA}.{SOURCE_TABLE}'. Verify SOURCE_COLUMNS.", file=sys.stderr)
          pg_cursor.close()
-         return False
+         return False, skipped_null_id_count, skipped_missing_node_count
 
     processed_count = 0
-    skipped_missing_node_count = 0
+    # Reset skipped_missing_node_count here, null id skips counted separately
+    skipped_missing_node_count = 0 
     print(f"Starting batch load (batch size: {batch_size})...")
-    print(f"Cypher Query Template:\n{cypher_query}") # Print the template for debugging
+    # print(f"Cypher Query Template:\n{cypher_query}") # Keep commented out unless debugging
 
     with tqdm(total=expected_count, desc=f"Edges :{NEO4J_EDGE_TYPE}", unit=" edges") as pbar:
          while True:
@@ -314,80 +311,107 @@ def load_participation_edges(pg_conn, neo4j_driver, batch_size):
 
             if not batch_data: break # End of data
 
-            # Convert Row objects to dictionaries and sanitise keys for Neo4j parameters
             batch_list = []
+            rows_in_batch_attempt = 0
             for row_dict in [dict(row) for row in batch_data]:
+                rows_in_batch_attempt += 1
+                # Check for NULL IDs first (cheap check)
                 if row_dict.get(SOURCE_NODE_ID) is None or row_dict.get(TARGET_NODE_ID) is None:
-                    skipped_missing_node_count += 1
+                    skipped_null_id_count += 1
+                    # Removed logging for individual null ID skips
                     continue
 
-                # Sanitise keys in the dictionary for the Cypher query parameter map
+                # Removed detailed node existence check here
+
+                # Sanitise keys (remains the same)
                 sanitised_item = {}
                 for col in SOURCE_COLUMNS:
-                    # Get the value from the row
                     value = row_dict.get(col)
-                    
-                    # Standard sanitisation for property names (replace hyphens)
                     prop_name = col.replace("-", "_")
-                    
-                    # Convert Decimal to float for Neo4j compatibility
                     if isinstance(value, Decimal):
                         value = float(value)
-                    # Add the value to the dictionary using the determined property name
                     sanitised_item[prop_name] = value
                 
                 batch_list.append(sanitised_item)
 
+            # Update progress bar based on rows fetched from PG, including null ID skips
+            pbar.update(rows_in_batch_attempt)
+
             if not batch_list: # If all rows in batch had null IDs
-                pbar.update(len(batch_data))
                 continue
 
             try:
                 with neo4j_driver.session(database="neo4j") as session:
+                    # Use execute_write for the MERGE operation
                     result = session.execute_write(
                         lambda tx: tx.run(cypher_query, batch=batch_list).consume()
                     )
-                    # Get the number of relationships created
-                    # Note: Neo4j doesn't provide a direct counter for relationships_matched
-                    # Only relationships_created is available
                     created = result.counters.relationships_created
-                    
                     processed_count += created
-                    # Check if we had missing nodes based on expected vs actual created
-                    if created < len(batch_list):
-                        skipped_missing_node_count += len(batch_list) - created
-                        print(f"\nNote: {len(batch_list) - created} edges skipped in this batch due to missing nodes.")
                     
-                    pbar.update(len(batch_data))
-                    
+                    # Calculate skips based on Neo4j's result (difference between valid items sent and items created)
+                    skips_in_batch = len(batch_list) - created
+                    if skips_in_batch > 0:
+                        skipped_missing_node_count += skips_in_batch
+                        # Optional: add a simple print or log here if you *really* need to know batch-level skips
+                        # print(f"\nNote: {skips_in_batch} edges skipped in this batch due to missing nodes (Neo4j).", file=sys.stderr)
+
             except Exception as e:
                 print(f"\nError processing batch in Neo4j: {e}", file=sys.stderr)
-                print(f"Failed Cypher: {cypher_query}", file=sys.stderr)
+                # print(f"Failed Cypher: {cypher_query}", file=sys.stderr) # Keep commented unless debugging
                 pg_cursor.close()
-                return False # Stop on Neo4j errors
+                return False, skipped_null_id_count, skipped_missing_node_count # Stop on Neo4j errors
 
     pg_cursor.close()
-    if skipped_missing_node_count > 0:
-        print(f"\nTotal edges skipped due to missing nodes: {skipped_missing_node_count}")
-    print(f"\nFinished batch loading. Processed {processed_count} edges.")
-
+    
     # 7. Get final count from Neo4j (after loading)
     count_after = get_neo4j_edge_count(neo4j_driver, NEO4J_EDGE_TYPE)
+    
+    # Print summary of skipped edges
+    print(f"\n--- Skipped Edges Summary ---")
+    print(f"Total edges skipped due to NULL IDs:       {skipped_null_id_count}")
+    print(f"Total edges skipped due to missing nodes (Neo4j): {skipped_missing_node_count}")
+    total_skipped = skipped_null_id_count + skipped_missing_node_count
+    print(f"Total skipped edges overall:             {total_skipped}")
+
+    # Write summary to log file
+    try:
+        with open(summary_log_filename, 'w') as f:
+            f.write(f"Skipped edge summary for {NEO4J_EDGE_TYPE}\n")
+            f.write(f"Source: {DBT_TARGET_SCHEMA}.{SOURCE_TABLE}\n")
+            f.write(f"Total expected edges (from PG): {expected_count}\n")
+            f.write(f"Skipped due to NULL IDs: {skipped_null_id_count}\n")
+            f.write(f"Skipped due to missing nodes (Neo4j): {skipped_missing_node_count}\n")
+            f.write(f"Total skipped: {total_skipped}\n")
+            f.write(f"Net processed/merged in Neo4j: {processed_count}\n")
+            f.write(f"Neo4j count before load: {count_before if count_before is not None else 'N/A'}\n")
+            f.write(f"Neo4j count after load: {count_after if count_after is not None else 'N/A'}\n")
+        print(f"Skip summary written to {os.path.abspath(summary_log_filename)}")
+    except IOError as e:
+        print(f"Error writing summary log file: {e}", file=sys.stderr)
+
+
     if count_after is not None:
         print(f"\n--- Count Summary ---")
         print(f"Expected Edge Count (from PG table): {expected_count}")
+        print(f"Skipped Edges (NULL IDs):            {skipped_null_id_count}")
         print(f"Skipped Edges (missing nodes):       {skipped_missing_node_count}")
-        print(f"Net Expected Edges:                  {expected_count - skipped_missing_node_count}")
+        net_expected_edges = expected_count - total_skipped
+        print(f"Net Expected Edges (valid IDs):      {net_expected_edges}")
         print(f"Count Before Load:                   {count_before if count_before is not None else 'N/A'}")
         print(f"Count After Load (Neo4j):            {count_after}")
 
-        # Note: The actual count might not match expected for edges as some nodes might not exist
-        if count_after < (expected_count - skipped_missing_node_count):
-             print(f"Note: Final Neo4j count ({count_after}) is lower than net expected count ({expected_count - skipped_missing_node_count}). This may be due to missing source or target nodes.", file=sys.stderr)
+        # Check final count against net expected based on successful merges
+        if count_after < processed_count + (count_before if count_before is not None else 0) :
+             print(f"Warning: Final Neo4j count ({count_after}) is lower than expected based on processed count ({processed_count}) plus initial count ({count_before}). Check for potential issues.", file=sys.stderr)
+        elif count_after != net_expected_edges + (count_before if count_before is not None else 0) and count_before is not None:
+             # This condition might still trigger if ON MATCH SET properties, but count doesn't change. Less critical.
+             print(f"Note: Final Neo4j count ({count_after}) doesn't perfectly match net expected ({net_expected_edges}) plus initial count ({count_before}). This might be due to existing edges being updated (ON MATCH).", file=sys.stderr)
+
     else:
         print("Could not verify final counts after loading.", file=sys.stderr)
 
-    return True # Indicate success
+    return True, skipped_null_id_count, skipped_missing_node_count # Indicate success
 
 
 # --- Main Execution ---
@@ -408,12 +432,14 @@ def main():
     pg_conn = None
     success = False
     start_time = time.time()
+    final_null_skips = 0
+    final_missing_node_skips = 0
     try:
         print("--- Starting Participation Edge Load ---")
         neo4j_driver = get_neo4j_driver()
         pg_conn = get_postgres_connection()
 
-        success = load_participation_edges(pg_conn, neo4j_driver, batch_size)
+        success, final_null_skips, final_missing_node_skips = load_participation_edges(pg_conn, neo4j_driver, batch_size)
 
     except KeyboardInterrupt:
         print("\nProcess interrupted by user.", file=sys.stderr)
@@ -432,6 +458,9 @@ def main():
 
         if success:
             print("\nParticipation edge loading process finished successfully.")
+            # Optional: Add final skip counts here too if desired
+            # print(f"Final NULL ID skips: {final_null_skips}")
+            # print(f"Final Missing Node skips: {final_missing_node_skips}")
         else:
             print("\nParticipation edge loading process finished with errors or was interrupted.", file=sys.stderr)
             sys.exit(1)
