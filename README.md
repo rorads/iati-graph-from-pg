@@ -48,10 +48,10 @@ This project sets up a PostgreSQL and Neo4j database using Docker Compose and pr
     source .env 
     
     # Install dependencies (needed after changes to packages in dbt_project.yml)
-    uv run dbt deps --project-dir "$DBT_PROJECT_DIR" --profiles-dir .
+    uv run dbt deps
     
     # Run dbt models
-    uv run dbt run --project-dir "$DBT_PROJECT_DIR" --profiles-dir .
+    uv run dbt run
     
     # Run other dbt commands similarly...
     ```

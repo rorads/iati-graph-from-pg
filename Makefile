@@ -25,8 +25,8 @@ help:
 	@echo "  1. Run 'make setup-env' (once)."
 	@echo "  2. Run 'source .env' in your shell."
 	@echo "  3. Run dbt commands directly, e.g.:"
-	@echo "     uv run dbt deps --project-dir \"$$DBT_PROJECT_DIR\" --profiles-dir ."
-	@echo "     uv run dbt run --project-dir \"$$DBT_PROJECT_DIR\" --profiles-dir ."
+	@echo "     uv run dbt deps"
+	@echo "     uv run dbt run"
 
 setup-env:
 	@if [ ! -f .env ]; then \
