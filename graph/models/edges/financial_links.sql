@@ -22,7 +22,7 @@ WITH ProviderToActivity AS (
         'USD' AS currency,                      -- Using standardized USD for all transactions
         SUM(t.value_usd) AS total_value_usd     -- Sum of USD values for this group
     FROM 
-        {{ source('iati', 'transaction') }} t
+        {{ source('iati_postgres', 'transaction') }} t
     WHERE 
         t.providerorg_ref IS NOT NULL AND t.providerorg_ref <> ''
         AND t.iatiidentifier IS NOT NULL AND t.iatiidentifier <> ''
@@ -46,7 +46,7 @@ WITH ProviderToActivity AS (
         'USD' AS currency,                      -- Using standardized USD for all transactions
         SUM(t.value_usd) AS total_value_usd     -- Sum of USD values for this group
     FROM 
-        {{ source('iati', 'transaction') }} t
+        {{ source('iati_postgres', 'transaction') }} t
     WHERE 
         t.receiverorg_ref IS NOT NULL AND t.receiverorg_ref <> ''
         AND t.iatiidentifier IS NOT NULL AND t.iatiidentifier <> ''

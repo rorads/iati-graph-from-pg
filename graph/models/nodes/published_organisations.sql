@@ -21,7 +21,7 @@ WITH ranked_organisations AS (
                 dataset DESC
         ) AS row_num
     FROM 
-        {{ source('iati', 'organisation') }}
+        {{ source('iati_postgres', 'organisation') }}
     WHERE 
         organisationidentifier IS NOT NULL
 )

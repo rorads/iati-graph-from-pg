@@ -8,7 +8,7 @@ models:
           column_name: iatiidentifier
       - dbt_utils.cardinality_equality:
           field: iatiidentifier
-          to: source('iati', 'activity')
+          to: source('iati_postgres', 'activity')
     columns:
       - name: iatiidentifier
         description: "Unique IATI Identifier"

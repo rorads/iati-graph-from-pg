@@ -13,7 +13,7 @@ SELECT DISTINCT
     po.role AS role_code,               -- The role code (e.g., '1' for Funding)
     po.rolename AS role_name            -- The human-readable role name
 FROM 
-    {{ source('iati', 'participatingorg') }} po
+    {{ source('iati_postgres', 'participatingorg') }} po
 WHERE 
     po.ref IS NOT NULL AND po.ref <> '' -- Ensure the organisation identifier exists
     AND po.iatiidentifier IS NOT NULL AND po.iatiidentifier <> '' -- Ensure the activity identifier exists

@@ -10,6 +10,11 @@ sources:
     description: "Raw tables loaded from the IATI PostgreSQL dump."
 
     tables:
+      - name: activity
+        description: "Contains raw activity data from IATI XML files"
+        columns:
+          - name: iatiidentifier
+            description: "The unique IATI activity identifier"
       - name: participatingorg
         description: "Participating organisations listed in activities."
       - name: transaction
