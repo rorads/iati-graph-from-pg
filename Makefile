@@ -10,7 +10,7 @@ endif
 DBT_PROJECT_DIR ?= graph
 
 # --- Targets --- 
-.PHONY: help download-dump clone-schemas setup-env
+.PHONY: help download-dump clone-schemas setup-env docker-up docker-down
 
 help:
 	@echo "Usage: make [target]"
@@ -20,6 +20,10 @@ help:
 	@echo "                   After running, use 'source .env' to load variables into your shell."
 	@echo "  download-dump    Download the IATI Postgres dump file (-N flag used)."
 	@echo "  clone-schemas    Clone the IATI-Schemas repository into additional-resource/."
+	@echo ""
+	@echo "Docker Compose:"
+	@echo "  docker-up        Start services defined in docker-compose.yml in detached mode."
+	@echo "  docker-down      Stop services defined in docker-compose.yml."
 	@echo ""
 	@echo "To run dbt commands:"
 	@echo "  1. Run 'make setup-env' (once)."
@@ -45,4 +49,14 @@ clone-schemas:
 	@echo "Cloning IATI-Schemas repository..."
 	@git clone https://github.com/IATI/IATI-Schemas.git additional-resources/IATI-Schemas
 	@echo "IATI-Schemas cloned successfully."
+
+docker-up:
+	@echo "Starting Docker containers..."
+	@docker compose up -d
+	@echo "Docker containers started."
+
+docker-down:
+	@echo "Stopping Docker containers..."
+	@docker compose down
+	@echo "Docker containers stopped."
 
