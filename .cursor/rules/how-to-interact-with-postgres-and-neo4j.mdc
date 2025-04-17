@@ -1,0 +1,83 @@
+---
+description: onsult this rule for the correct terminal commands and parameters required to query the PostgreSQL (via docker compose exec psql) and Neo4j (via curl) databases running within this project's Docker environment. It includes specific examples tailored to the project's configuration (service names, ports, common credentials).
+globs: 
+alwaysApply: false
+---
+ # How to Interact with PostgreSQL and Neo4j via Terminal
+
+This rule describes how to query the PostgreSQL and Neo4j databases running in Docker containers directly from the host machine's terminal, based on the setup in this project.
+
+## Interacting with PostgreSQL (via Docker Exec)
+
+Since PostgreSQL is running inside a Docker container, use `docker compose exec` to run `psql` commands within the container.
+
+**General Command Structure:**
+
+```bash
+docker compose exec -e PGPASSWORD=<password> <service_name> psql -h <service_name> -U <user> -d <database> -c "<sql_command>" | cat
+```
+
+**Key Parameters:**
+
+*   `-e PGPASSWORD=<password>`: Sets the password environment variable for the command. Replace `<password>` with the actual PostgreSQL password (e.g., `dev_password`).
+*   `<service_name>`: The name of the PostgreSQL service defined in `docker-compose.yml` (e.g., `postgres`). Use this for both the service to `exec` into and the `-h` (host) flag, as the hostname is resolvable within the Docker network.
+*   `<user>`: The PostgreSQL user (e.g., `postgres`).
+*   `<database>`: The PostgreSQL database name (e.g., `iati`).
+*   `-c "<sql_command>"`: The SQL query to execute, enclosed in double quotes.
+*   `| cat`: Pipes the output to `cat` to prevent `psql` from using a pager, ensuring the output is displayed directly in the terminal.
+
+**Example (Counting Published Activities):**
+
+```bash
+# Assumes service='postgres', user='postgres', db='iati', password='dev_password'
+docker compose exec -e PGPASSWORD=dev_password postgres psql -h postgres -U postgres -d iati -c "SELECT count(*) FROM iati_graph.published_activities;" | cat
+```
+
+**Example (Describing a Table):**
+
+```bash
+docker compose exec -e PGPASSWORD=dev_password postgres psql -h postgres -U postgres -d iati -c "\\d iati_graph.published_activities" | cat
+```
+*(Note the escaped backslash `\\d` needed for the shell)*
+
+## Interacting with Neo4j (via Curl)
+
+Neo4j exposes an HTTP endpoint (usually on port 7474) that can be queried using `curl`.
+
+**General Command Structure:**
+
+```bash
+curl -X POST \
+     -H "Content-Type: application/json" \
+     -H "Accept: application/json;charset=UTF-8" \
+     -u <user>:<password> \
+     -d '{"statements":[{"statement":"<cypher_query>"}]}' \
+     http://<host>:<http_port>/db/neo4j/tx/commit | cat
+```
+
+**Key Parameters:**
+
+*   `-X POST`: Specifies the HTTP POST method.
+*   `-H "Content-Type: application/json"`: Sets the request content type.
+*   `-H "Accept: ..."`: Sets the desired response format.
+*   `-u <user>:<password>`: Provides Neo4j authentication credentials (e.g., `neo4j:dev_password`).
+*   `-d '{"statements":[{"statement":"<cypher_query>"}]}'`: The JSON payload containing the Cypher query to execute. Ensure the Cypher query within the JSON is properly quoted/escaped if necessary.
+*   `http://<host>:<http_port>/db/neo4j/tx/commit`: The URL for the Neo4j transactional Cypher endpoint.
+    *   `<host>`: Hostname or IP address where Neo4j is accessible from your machine (e.g., `localhost`).
+    *   `<http_port>`: The HTTP port exposed by Neo4j (e.g., `7474`).
+    *   `/db/neo4j/tx/commit`: The path for the transactional endpoint (may vary slightly with Neo4j versions, but this works for 4.x/5.x).
+*   `| cat`: Pipes the JSON output to `cat` for cleaner display. You might prefer piping to `jq` for formatted JSON output if `jq` is installed (`| jq`).
+
+**Example (Counting PublishedActivity Nodes):**
+
+```bash
+# Assumes host='localhost', port=7474, user='neo4j', password='dev_password'
+curl -X POST \
+     -H "Content-Type: application/json" \
+     -H "Accept: application/json;charset=UTF-8" \
+     -u neo4j:dev_password \
+     -d '{"statements":[{"statement":"MATCH (n:PublishedActivity) RETURN count(n) AS count"}]}' \
+     http://localhost:7474/db/neo4j/tx/commit | cat
+```
+
+**Note:** Ensure the Docker containers for PostgreSQL and Neo4j are running (`make docker-up` or `docker compose up -d`) before attempting to connect.

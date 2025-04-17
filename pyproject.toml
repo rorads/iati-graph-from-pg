@@ -11,6 +11,7 @@ dependencies = [
     "dbt-extractor>=0.6.0",
     "dbt-postgres>=1.9.0",
     "dbt-semantic-interfaces>=0.7.4",
+    "dotenv>=0.9.9",
     "neo4j>=5.28.1",
     "psycopg2-binary>=2.9.10",
     "tqdm>=4.67.1",

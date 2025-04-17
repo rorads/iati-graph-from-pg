@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Commit changes as you work. If changes are very small, ask for confirmation at the end of your work. If it's a large feature, then do this unilaterally.
+
+When generating Git commit messages, always follow the Conventional Commits specification (https://www.conventionalcommits.org/). The format should be `<type>(<scope>): <subject>`, where `<type>` indicates the kind of change (e.g., feat, fix, docs, style, refactor, perf, test, chore), `<scope>` is optional and specifies the area of the codebase affected, and `<subject>` is a concise description of the change starting with a lowercase letter and without a period at the end.
