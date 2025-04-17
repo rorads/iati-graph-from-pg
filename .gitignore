@@ -84,9 +84,6 @@ neo4j_logs/
 neo4j_plugins/
 neo4j_config/
 
-# Editor specific
-.cursor/
-
 additional-resources/*
 !additional-resources/.gitkeep
 
