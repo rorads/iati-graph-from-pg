@@ -1,0 +1,22 @@
+version: 2
+
+sources:
+  - name: iati_postgres # This is an arbitrary name for this source configuration
+    # For database: and schema: you might need to adjust these based on your dbt profile's target settings
+    # Assuming your profile connects to the 'iati' database directly:
+    database: iati 
+    schema: iati   # This is the actual schema name in PostgreSQL
+    
+    description: "Raw tables loaded from the IATI PostgreSQL dump."
+
+    tables:
+      - name: participatingorg
+        description: "Participating organisations listed in activities."
+      - name: transaction
+        description: "Financial transactions related to activities."
+      - name: organisation
+        description: "Registered organisations publishing IATI data."
+      - name: otheridentifier
+        description: "Alternative identifiers for organisations."
+      - name: organisation_recipientorgbudget
+        description: "Budget information per recipient organisation, reported by publishers." 
