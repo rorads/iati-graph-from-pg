@@ -4,15 +4,16 @@ config-version: 2
 
 profile: 'iati_graph'
 
-model-paths: ["graph/models"]
-analysis-paths: ["graph/analyses"]
-test-paths: ["graph/tests"]
-seed-paths: ["graph/seeds"]
-macro-paths: ["graph/macros"]
-snapshot-paths: ["graph/snapshots"]
+# Define paths relative to this file (graph/)
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
 
-target-path: "graph/target"
-clean-targets:
+# Removed deprecated target-path - dbt will use ./target/ by default
+clean-targets: # These are relative to the project root (graph/)
   - "target"
   - "dbt_packages"
   - "logs"

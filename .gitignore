@@ -97,7 +97,4 @@ profiles.yml
 # Keep example env file
 !.env.example
 
-# dbt build artifacts
-target/
-dbt_packages/
-logs/
+# dbt build artifacts section removed - handled by graph/.gitignore
