@@ -20,10 +20,10 @@ DBT_TARGET_SCHEMA = "iati_graph"
 SOURCE_TABLE = "participation_links"
 NEO4J_EDGE_TYPE = "PARTICIPATES_IN"  # Edge type/relationship name (Neo4j convention: uppercase with underscores)
 
-# Node labels for source and target (make sure they match what's in the database)
-ORGANISATION_LABEL = "PublishedOrganisation"  # Or adjust based on your node label
+# Node labels for source and target - updated to match actual labels used in node loader scripts
+ORGANISATION_LABEL = "PublishedOrganisation"  # For published organisations
 PHANTOM_ORG_LABEL = "PhantomOrganisation"     # For phantom organisations
-ACTIVITY_LABEL = "PublishedActivity"          # Or adjust based on your node label 
+ACTIVITY_LABEL = "PublishedActivity"          # For published activities
 PHANTOM_ACTIVITY_LABEL = "PhantomActivity"    # For phantom activities
 
 # Column mappings
@@ -79,12 +79,148 @@ def get_neo4j_edge_count(neo4j_driver, edge_type):
         return None # Return None to indicate failure
 
 
+def check_node_existence(neo4j_driver, pg_conn, batch_size=100):
+    """Samples and checks node existence to help debug missing nodes."""
+    print("\n--- Node Existence Check (Debugging) ---")
+    
+    # Get node type counts
+    node_types = [
+        {"label": ORGANISATION_LABEL, "id_prop": "organisationidentifier"},
+        {"label": PHANTOM_ORG_LABEL, "id_prop": "reference"},
+        {"label": ACTIVITY_LABEL, "id_prop": "iatiidentifier"},
+        {"label": PHANTOM_ACTIVITY_LABEL, "id_prop": "phantom_activity_identifier"}
+    ]
+    
+    # Log node counts first
+    for node_type in node_types:
+        cypher = f"MATCH (n:{node_type['label']}) RETURN count(n) AS count"
+        try:
+            with neo4j_driver.session() as session:
+                result = session.execute_read(lambda tx: tx.run(cypher).single())
+                count = result["count"] if result else 0
+                print(f"  Node count for :{node_type['label']}: {count}")
+        except Exception as e:
+            print(f"  Error getting count for {node_type['label']}: {e}")
+    
+    # Sample some activities and organisations from the links table
+    print("\n  Sampling IDs from participation_links table:")
+    try:
+        with pg_conn.cursor() as cursor:
+            # Sample organization IDs
+            cursor.execute(f"""
+                SELECT DISTINCT organisation_id 
+                FROM "{DBT_TARGET_SCHEMA}"."{SOURCE_TABLE}" 
+                LIMIT 5
+            """)
+            org_ids = [row[0] for row in cursor.fetchall()]
+            print(f"  Sample organisation_ids: {org_ids}")
+            
+            # Sample activity IDs
+            cursor.execute(f"""
+                SELECT DISTINCT activity_id 
+                FROM "{DBT_TARGET_SCHEMA}"."{SOURCE_TABLE}" 
+                LIMIT 5
+            """)
+            act_ids = [row[0] for row in cursor.fetchall()]
+            print(f"  Sample activity_ids: {act_ids}")
+            
+            # Check if these IDs exist in Neo4j
+            print("\n  Checking if sampled IDs exist in Neo4j:")
+            
+            # Check organisation IDs
+            for org_id in org_ids:
+                with neo4j_driver.session() as session:
+                    # Check published organisations
+                    result = session.execute_read(
+                        lambda tx: tx.run(
+                            f"MATCH (n:{ORGANISATION_LABEL}) WHERE n.organisationidentifier = $id RETURN COUNT(n) as count",
+                            id=org_id
+                        ).single()
+                    )
+                    pub_count = result["count"] if result else 0
+                    
+                    # Check phantom organisations
+                    result = session.execute_read(
+                        lambda tx: tx.run(
+                            f"MATCH (n:{PHANTOM_ORG_LABEL}) WHERE n.reference = $id RETURN COUNT(n) as count",
+                            id=org_id
+                        ).single()
+                    )
+                    phantom_count = result["count"] if result else 0
+                    
+                    print(f"  Org ID {org_id}: {pub_count} published, {phantom_count} phantom")
+            
+            # Check activity IDs
+            for act_id in act_ids:
+                with neo4j_driver.session() as session:
+                    # Check published activities
+                    result = session.execute_read(
+                        lambda tx: tx.run(
+                            f"MATCH (n:{ACTIVITY_LABEL}) WHERE n.iatiidentifier = $id RETURN COUNT(n) as count",
+                            id=act_id
+                        ).single()
+                    )
+                    pub_count = result["count"] if result else 0
+                    
+                    # Check phantom activities
+                    result = session.execute_read(
+                        lambda tx: tx.run(
+                            f"MATCH (n:{PHANTOM_ACTIVITY_LABEL}) WHERE n.phantom_activity_identifier = $id RETURN COUNT(n) as count",
+                            id=act_id
+                        ).single()
+                    )
+                    phantom_count = result["count"] if result else 0
+                    
+                    print(f"  Activity ID {act_id}: {pub_count} published, {phantom_count} phantom")
+    
+    except Exception as e:
+        print(f"  Error during sampling check: {e}")
+    
+    # Check for overall mismatch counts (approximate)
+    try:
+        with pg_conn.cursor() as cursor:
+            # Count distinct organisations in links that don't exist in Neo4j
+            cypher = f"""
+            WITH $org_ids as orgIds
+            UNWIND orgIds as id
+            OPTIONAL MATCH (org:PublishedOrganisation) WHERE org.organisationidentifier = id
+            OPTIONAL MATCH (phantomOrg:PhantomOrganisation) WHERE phantomOrg.reference = id 
+            WITH id, org, phantomOrg
+            WHERE org IS NULL AND phantomOrg IS NULL
+            RETURN count(id) as missingCount
+            """
+            
+            # Get sample of org IDs (limit to avoid performance issues)
+            cursor.execute(f"""
+                SELECT DISTINCT organisation_id 
+                FROM "{DBT_TARGET_SCHEMA}"."{SOURCE_TABLE}" 
+                LIMIT 1000
+            """)
+            sample_org_ids = [row[0] for row in cursor.fetchall()]
+            
+            if sample_org_ids:
+                with neo4j_driver.session() as session:
+                    result = session.execute_read(
+                        lambda tx: tx.run(cypher, org_ids=sample_org_ids).single()
+                    )
+                    missing_orgs = result["missingCount"] if result else 0
+                    print(f"\n  ~{missing_orgs} of {len(sample_org_ids)} sampled org IDs are missing from Neo4j")
+    
+    except Exception as e:
+        print(f"  Error during mismatch count check: {e}")
+    
+    print("\n--- End of Node Existence Check ---\n")
+
+
 # --- Data Loading Function ---
 
 def load_participation_edges(pg_conn, neo4j_driver, batch_size):
     """Loads participation edges from PostgreSQL to Neo4j."""
     print(f"--- Loading Edges: {DBT_TARGET_SCHEMA}.{SOURCE_TABLE} -> :{NEO4J_EDGE_TYPE} ---")
 
+    # Add this near the beginning with pg_conn parameter
+    check_node_existence(neo4j_driver, pg_conn)
+    
     # 1. Get expected count from PostgreSQL
     expected_count = get_pg_count(pg_conn, DBT_TARGET_SCHEMA, SOURCE_TABLE)
     if expected_count is None: return False
@@ -118,14 +254,22 @@ def load_participation_edges(pg_conn, neo4j_driver, batch_size):
     # Use MERGE for idempotency - first try published nodes, then phantom nodes if not found
     cypher_query = f"""
     UNWIND $batch as row
-    // First try to match with published organisation and activity
-    OPTIONAL MATCH (org:{ORGANISATION_LABEL}) WHERE org.organisationidentifier = row.{SOURCE_NODE_ID}
-    OPTIONAL MATCH (act:{ACTIVITY_LABEL}) WHERE act.iatiidentifier = row.{TARGET_NODE_ID}
+    // First try to match with published organisation
+    OPTIONAL MATCH (org:{ORGANISATION_LABEL}) 
+    WHERE org.organisationidentifier = row.{SOURCE_NODE_ID}
     
-    // If not found, try phantom organisation and/or activity
+    // First try to match with published activity
+    OPTIONAL MATCH (act:{ACTIVITY_LABEL}) 
+    WHERE act.iatiidentifier = row.{TARGET_NODE_ID}
+    
+    // If organisation not found, try phantom organisation
     WITH row, org, act
-    OPTIONAL MATCH (phantomOrg:{PHANTOM_ORG_LABEL}) WHERE phantomOrg.reference = row.{SOURCE_NODE_ID} AND org IS NULL
-    OPTIONAL MATCH (phantomAct:{PHANTOM_ACTIVITY_LABEL}) WHERE phantomAct.phantom_activity_identifier = row.{TARGET_NODE_ID} AND act IS NULL
+    OPTIONAL MATCH (phantomOrg:{PHANTOM_ORG_LABEL}) 
+    WHERE phantomOrg.reference = row.{SOURCE_NODE_ID} AND org IS NULL
+    
+    // If activity not found, try phantom activity
+    OPTIONAL MATCH (phantomAct:{PHANTOM_ACTIVITY_LABEL}) 
+    WHERE phantomAct.phantom_activity_identifier = row.{TARGET_NODE_ID} AND act IS NULL
     
     // Use the appropriate nodes (published or phantom)
     WITH row, 
@@ -139,6 +283,7 @@ def load_participation_edges(pg_conn, neo4j_driver, batch_size):
     MERGE (sourceNode)-[r:{NEO4J_EDGE_TYPE}]->(targetNode)
     ON CREATE SET {set_clause_str}
     ON MATCH SET {set_clause_str}
+    RETURN count(r) as relationshipsCreated
     """
 
     # 6. Execute Loading in Batches
@@ -293,4 +438,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
