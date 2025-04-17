@@ -19,4 +19,6 @@ sources:
       - name: otheridentifier
         description: "Alternative identifiers for organisations."
       - name: organisation_recipientorgbudget
-        description: "Budget information per recipient organisation, reported by publishers." 
+        description: "Budget information per recipient organisation, reported by publishers."
+      - name: relatedactivity
+        description: "Links between related IATI activities." 
