@@ -1,0 +1,144 @@
+version: 2
+
+models:   
+  - name: published_activities
+    description: "Published, deduplicated activities model with key fields. Strictly one row per IATI Identifier, possibly with loss of data."
+    tests:
+      - unique:
+          column_name: iatiidentifier
+      - dbt_utils.cardinality_equality:
+          field: iatiidentifier
+          to: source('iati', 'activity')
+    columns:
+      - name: iatiidentifier
+        description: "Unique IATI Identifier"
+      - name: title_narrative
+        description: "Activity title narrative text"
+      - name: reportingorg_ref
+        description: "Reference code for the reporting organisation"
+      - name: reportingorg_narrative
+        description: "Narrative name of the reporting organisation"
+      - name: reportingorg_type
+        description: "Type code for the reporting organisation"
+      - name: activitystatus_code
+        description: "Status code of the activity"
+      - name: plannedstart
+        description: "Planned start date of the activity"
+      - name: plannedend
+        description: "Planned end date of the activity"
+      - name: actualstart
+        description: "Actual start date of the activity"
+      - name: actualend
+        description: "Actual end date of the activity"
+      - name: lastupdateddatetime
+        description: "Date and time when the activity was last updated"
+      - name: hierarchy
+        description: "Hierarchy level of the activity"
+      - name: dportal_link
+        description: "Link to the activity on D-Portal"
+
+  - name: published_organisations
+    description: "Published, deduplicated organisations model with key fields. Strictly one row per Organisation Identifier, possibly with loss of data."
+    tests:
+      - unique:
+          column_name: organisationidentifier
+    columns:
+      - name: organisationidentifier
+        description: "Unique Organisation Identifier"
+        tests:
+          - not_null
+      - name: name_narrative
+        description: "Organisation name narrative text"
+      - name: hierarchy
+        description: "Hierarchy level of the organisation"
+      - name: reportingorg_ref
+        description: "Reference code for the reporting organisation"
+
+  - name: phantom_organisations
+    description: "List of organisations that are referenced in the participatingorg, transaction, and organisation_recipientorgbudget tables, but are not present in the organisation or otheridentifier tables."
+    tests:
+      - unique:  # Ensure each phantom org ID appears only once (if grouping happens before this)
+          column_name: reference
+      - not_null:
+          column_name: reference
+      - not_null:
+          column_name: distinct_narratives
+      - not_null:
+          column_name: phantom_in_participatingorg
+      - not_null:
+          column_name: phantom_in_transaction_provider
+      - not_null:
+          column_name: phantom_in_transaction_receiver
+      - not_null:
+          column_name: phantom_in_orgbudget_recipient
+    columns:
+      - name: reference
+        description: "Unique Organisation Identifier"
+      - name: distinct_narratives
+        description: "Array of distinct narratives for the phantom organisation"
+      - name: phantom_in_participatingorg
+        description: "Boolean flag indicating if the phantom organisation is referenced in the participatingorg table"
+      - name: phantom_in_transaction_provider
+        description: "Boolean flag indicating if the phantom organisation is referenced in the transaction table as a provider"
+      - name: phantom_in_transaction_receiver
+        description: "Boolean flag indicating if the phantom organisation is referenced in the transaction table as a receiver"
+      - name: phantom_in_orgbudget_recipient
+        description: "Boolean flag indicating if the phantom organisation is referenced in the organisation_recipientorgbudget table"
+
+  - name: phantom_activities
+    description: "List of activity identifiers that are referenced in various tables but do not exist in the main activity table."
+    columns:
+      - name: phantom_activity_identifier
+        description: "The IATI activity identifier that was referenced but not found in the activity table."
+        tests:
+          - not_null
+      - name: source_column
+        description: "The specific table and column where the phantom reference was found (e.g., 'relatedactivity.ref')."
+        tests:
+          - not_null
+      - name: source_activity_id
+        description: "The IATI identifier of the activity record that contained the phantom reference."
+        tests:
+          - not_null
+
+  - name: participation_links
+    description: "Represents the participation of an organisation in an activity, including their role."
+    columns:
+      - name: activity_id
+        description: "The IATI identifier of the activity."
+        tests: [not_null]
+      - name: organisation_id
+        description: "The IATI identifier of the participating organisation."
+        tests: [not_null]
+      - name: role_code
+        description: "The IATI code for the organisation's role in the activity."
+        tests: [not_null]
+      - name: role_name
+        description: "The human-readable name of the organisation's role."
+
+  - name: financial_links
+    description: "Represents aggregated financial flows between organisations and activities for specific transaction types, standardized to USD."
+    columns:
+      - name: source_node_id
+        description: "The IATI identifier of the source node (either an organisation or an activity)."
+        tests: [not_null]
+      - name: target_node_id
+        description: "The IATI identifier of the target node (either an activity or an organisation)."
+        tests: [not_null]
+      - name: source_node_type
+        description: "Indicates if the source node is an 'ORGANISATION' or 'ACTIVITY'."
+        tests: [not_null, accepted_values: { values: ['ORGANISATION', 'ACTIVITY'] }]
+      - name: target_node_type
+        description: "Indicates if the target node is an 'ACTIVITY' or 'ORGANISATION'."
+        tests: [not_null, accepted_values: { values: ['ACTIVITY', 'ORGANISATION'] }]
+      - name: transactiontype_code
+        description: "The IATI code for the transaction type (e.g., C, D, E, IF)."
+        tests: [not_null]
+      - name: transaction_type_name
+        description: "The human-readable name of the transaction type."
+      - name: currency
+        description: "The currency for the aggregated value (always 'USD')."
+        tests: [not_null, accepted_values: { values: ['USD'] }]
+      - name: total_value_usd
+        description: "The aggregated sum of transaction values in USD for this specific link and type."
+        tests: [not_null]
