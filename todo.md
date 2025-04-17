@@ -1,0 +1,3 @@
+# TODO
+
+- **Graph Structure Note:** The current Neo4j graph model does not contain direct `(:PublishedActivity)-[:FINANCIAL_TRANSACTION]->(:PublishedActivity)` relationships. Financial transactions appear to link Organisations (Published/Phantom) to the PublishedActivities involved, typically representing the recipient organisation receiving funds *to* the activity, or the provider organisation disbursing funds *to* the activity. This needs to be considered when defining and querying funding chains. 
