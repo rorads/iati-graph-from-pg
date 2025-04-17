@@ -90,4 +90,14 @@ neo4j_config/
 additional-resources/*
 !additional-resources/.gitkeep
 
+# DBT / Config
+profiles.yml
+.user.yml
+.env
+# Keep example env file
+!.env.example
 
+# dbt build artifacts
+target/
+dbt_packages/
+logs/
