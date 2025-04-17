@@ -202,15 +202,16 @@ def load_participation_edges(pg_conn, neo4j_driver, batch_size):
                     result = session.execute_write(
                         lambda tx: tx.run(cypher_query, batch=batch_list).consume()
                     )
-                    # Get the number of relationships created or matched
+                    # Get the number of relationships created
+                    # Note: Neo4j doesn't provide a direct counter for relationships_matched
+                    # Only relationships_created is available
                     created = result.counters.relationships_created
-                    matched = result.counters.relationships_matched - created  # Subtract created from total matched
                     
-                    processed_count += created + matched
-                    # Check if we had missing nodes
-                    if created + matched < len(batch_list):
-                        skipped_missing_node_count += len(batch_list) - (created + matched)
-                        print(f"\nNote: {len(batch_list) - (created + matched)} edges skipped in this batch due to missing nodes.")
+                    processed_count += created
+                    # Check if we had missing nodes based on expected vs actual created
+                    if created < len(batch_list):
+                        skipped_missing_node_count += len(batch_list) - created
+                        print(f"\nNote: {len(batch_list) - created} edges skipped in this batch due to missing nodes.")
                     
                     pbar.update(len(batch_data))
                     
