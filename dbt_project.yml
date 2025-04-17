@@ -1,0 +1,33 @@
+name: 'iati_graph'
+version: '1.0.0'
+config-version: 2
+
+profile: 'iati_graph'
+
+model-paths: ["graph/models"]
+analysis-paths: ["graph/analyses"]
+test-paths: ["graph/tests"]
+seed-paths: ["graph/seeds"]
+macro-paths: ["graph/macros"]
+snapshot-paths: ["graph/snapshots"]
+
+target-path: "graph/target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+  - "logs"
+
+models:
+  iati_graph:
+    # Configurations for models within the nodes directory
+    nodes:
+      +materialized: table
+      +persist_docs:
+        relation: true
+        columns: true
+    # Configurations for models within the edges directory
+    edges:
+      +materialized: table
+      +persist_docs:
+        relation: true
+        columns: true
