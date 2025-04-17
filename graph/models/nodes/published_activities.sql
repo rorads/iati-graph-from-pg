@@ -20,7 +20,7 @@ WITH ranked_activities AS (
                 dataset DESC
         ) AS row_num
     FROM 
-        {{ source('iati', 'activity') }}
+        {{ source('iati_postgres', 'activity') }}
     WHERE 
         iatiidentifier IS NOT NULL
 )
