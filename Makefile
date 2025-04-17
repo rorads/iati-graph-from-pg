@@ -10,17 +10,23 @@ endif
 DBT_PROJECT_DIR ?= graph
 
 # --- Targets --- 
-.PHONY: help download-dump clone-schemas setup-env dbt-deps dbt-run
+.PHONY: help download-dump clone-schemas setup-env
 
 help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
 	@echo "  setup-env        Create .env file from .env.example if it doesn't exist."
-	@echo "  download-dump    Download the IATI Postgres dump file."
+	@echo "                   After running, use 'source .env' to load variables into your shell."
+	@echo "  download-dump    Download the IATI Postgres dump file (-N flag used)."
 	@echo "  clone-schemas    Clone the IATI-Schemas repository into additional-resource/."
-	@echo "  dbt-deps         Install dbt dependencies."
-	@echo "  dbt-run          Run dbt models (uses DBT_PROJECT_DIR from .env or default)."
+	@echo ""
+	@echo "To run dbt commands:"
+	@echo "  1. Run 'make setup-env' (once)."
+	@echo "  2. Run 'source .env' in your shell."
+	@echo "  3. Run dbt commands directly, e.g.:"
+	@echo "     uv run dbt deps --project-dir \"$$DBT_PROJECT_DIR\" --profiles-dir ."
+	@echo "     uv run dbt run --project-dir \"$$DBT_PROJECT_DIR\" --profiles-dir ."
 
 setup-env:
 	@if [ ! -f .env ]; then \
@@ -39,12 +45,4 @@ clone-schemas:
 	@echo "Cloning IATI-Schemas repository..."
 	@git clone https://github.com/IATI/IATI-Schemas.git additional-resources/IATI-Schemas
 	@echo "IATI-Schemas cloned successfully."
-
-dbt-deps:
-	@echo "Installing dbt dependencies for project in $(DBT_PROJECT_DIR)..."
-	uv run dbt deps --project-dir $(DBT_PROJECT_DIR) --profiles-dir .
-
-dbt-run: dbt-deps
-	@echo "Running dbt models in project $(DBT_PROJECT_DIR)..."
-	uv run dbt run --project-dir $(DBT_PROJECT_DIR) --profiles-dir .
 
