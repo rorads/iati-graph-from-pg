@@ -57,13 +57,38 @@ WITH ProviderToActivity AS (
         t.receiverorg_ref,
         t.transactiontype_code,
         t.transactiontype_codename
+
+), ProviderActivityToActivity AS (
+    -- Aggregate funds flowing FROM a provider activity TO the context activity
+    SELECT
+        t.providerorg_provideractivityid AS source_node_id,-- Activity providing the funds (CORRECTED column name)
+        t.iatiidentifier AS target_node_id,     -- Activity receiving the funds (context)
+        'ACTIVITY' AS source_node_type,         -- Type of the source node
+        'ACTIVITY' AS target_node_type,         -- Type of the target node
+        t.transactiontype_code,
+        t.transactiontype_codename AS transaction_type_name,
+        'USD' AS currency,                      
+        SUM(t.value_usd) AS total_value_usd     
+    FROM 
+        {{ source('iati_postgres', 'transaction') }} t
+    WHERE 
+        -- Provider is another activity, receiver is the context activity
+        t.providerorg_provideractivityid IS NOT NULL AND t.providerorg_provideractivityid <> '' -- CORRECTED column name
+        AND t.iatiidentifier IS NOT NULL AND t.iatiidentifier <> '' 
+        -- Ensure it's not also linked FROM an org to avoid ambiguity if providerorg is also present
+        AND t.providerorg_ref IS NULL  
+        AND t.transactiontype_code IS NOT NULL AND t.transactiontype_code <> ''
+        AND t.value_usd IS NOT NULL            
+    GROUP BY
+        t.providerorg_provideractivityid, -- CORRECTED column name
+        t.iatiidentifier,
+        t.transactiontype_code,
+        t.transactiontype_codename
 )
 
--- Combine the two directions of flow
+-- Combine the three directions of flow
 SELECT * FROM ProviderToActivity
 UNION ALL
 SELECT * FROM ActivityToReceiver
-ORDER BY
-    source_node_id,
-    target_node_id,
-    transactiontype_code
+UNION ALL 
+SELECT * FROM ProviderActivityToActivity -- Added activity-to-activity links
