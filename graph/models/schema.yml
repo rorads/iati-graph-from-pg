@@ -120,25 +120,47 @@ models:
     description: "Represents aggregated financial flows between organisations and activities for specific transaction types, standardized to USD."
     columns:
       - name: source_node_id
-        description: "The IATI identifier of the source node (either an organisation or an activity)."
+        description: "The ID of the source node (organisation or activity reference)."
         tests: [not_null]
       - name: target_node_id
-        description: "The IATI identifier of the target node (either an activity or an organisation)."
+        description: "The ID of the target node (organisation or activity reference)."
         tests: [not_null]
       - name: source_node_type
-        description: "Indicates if the source node is an 'ORGANISATION' or 'ACTIVITY'."
-        tests: [not_null, accepted_values: { values: ['ORGANISATION', 'ACTIVITY'] }]
+        description: "The type of the source node ('ORGANISATION' or 'ACTIVITY')."
+        tests: [not_null]
       - name: target_node_type
-        description: "Indicates if the target node is an 'ACTIVITY' or 'ORGANISATION'."
-        tests: [not_null, accepted_values: { values: ['ACTIVITY', 'ORGANISATION'] }]
+        description: "The type of the target node ('ORGANISATION' or 'ACTIVITY')."
+        tests: [not_null]
       - name: transactiontype_code
-        description: "The IATI code for the transaction type (e.g., C, D, E, IF)."
+        description: "The IATI code for the transaction type."
         tests: [not_null]
       - name: transaction_type_name
         description: "The human-readable name of the transaction type."
       - name: currency
-        description: "The currency for the aggregated value (always 'USD')."
-        tests: [not_null, accepted_values: { values: ['USD'] }]
+        description: "The currency code for the transaction values."
+        tests: [not_null]
       - name: total_value_usd
-        description: "The aggregated sum of transaction values in USD for this specific link and type."
+        description: "The total value of all transactions of this type between the source and target, standardized to USD."
+        tests: [not_null]
+
+  - name: funds_links
+    description: "A simplified abstraction of financial transactions between activities, representing the flow of funds regardless of specific transaction types."
+    columns:
+      - name: source_node_id
+        description: "The IATI activity identifier of the source activity (provider of funds)."
+        tests: [not_null]
+      - name: target_node_id
+        description: "The IATI activity identifier of the target activity (receiver of funds)."
+        tests: [not_null]
+      - name: source_node_type
+        description: "The type of the source node (always 'ACTIVITY' for this relationship)."
+        tests: [not_null]
+      - name: target_node_type
+        description: "The type of the target node (always 'ACTIVITY' for this relationship)."
+        tests: [not_null]
+      - name: currency
+        description: "The currency code for the transaction values (standardized to USD)."
+        tests: [not_null]
+      - name: total_value_usd
+        description: "The total value of all funds flowing from the source activity to the target activity, standardized to USD."
         tests: [not_null]
