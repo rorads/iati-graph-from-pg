@@ -78,19 +78,19 @@ def check_node_existence(neo4j_driver, pg_conn, batch_size=100):
     try:
         pg_cursor = pg_conn.cursor()
         pg_cursor.execute(f"""
-            SELECT 
+            (SELECT 
                 {SOURCE_NODE_ID_COL} AS id, 'SOURCE' AS type,
                 {SOURCE_NODE_TYPE_COL} AS node_type
             FROM 
                 "{DBT_TARGET_SCHEMA}"."{SOURCE_TABLE}" 
-            LIMIT {batch_size}
+            LIMIT {batch_size})
             UNION ALL
-            SELECT 
+            (SELECT 
                 {TARGET_NODE_ID_COL} AS id, 'TARGET' AS type,
                 {TARGET_NODE_TYPE_COL} AS node_type
             FROM 
                 "{DBT_TARGET_SCHEMA}"."{SOURCE_TABLE}" 
-            LIMIT {batch_size}
+            LIMIT {batch_size})
         """)
         
         for row in pg_cursor.fetchall():
