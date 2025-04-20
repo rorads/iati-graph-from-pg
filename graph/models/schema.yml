@@ -164,3 +164,25 @@ models:
       - name: total_value_usd
         description: "The total value of all funds flowing from the source activity to the target activity, standardized to USD."
         tests: [not_null]
+  - name: hierarchy_links
+    description: "Represents parent-child and sibling relationships between activities, compressing multiple declarations into one edge with `declared_by` property."
+    tests:
+      - not_null:
+          column_name: source_node_id
+      - not_null:
+          column_name: target_node_id
+      - not_null:
+          column_name: relationship_type
+    columns:
+      - name: source_node_id
+        description: "The IATI activity identifier of the source activity (the parent in parent-child relationships, or the lexicographically smaller of the pair in sibling relationships)."
+      - name: target_node_id
+        description: "The IATI activity identifier of the target activity (the child in parent-child relationships, or the lexicographically larger of the pair in sibling relationships)."
+      - name: source_node_type
+        description: "The type of the source node (always 'ACTIVITY')."
+      - name: target_node_type
+        description: "The type of the target node (always 'ACTIVITY')."
+      - name: relationship_type
+        description: "The type of relationship: 'PARENT_OF' or 'SIBLING_OF'."
+      - name: declared_by
+        description: "Array of activity identifiers that declared this relationship."

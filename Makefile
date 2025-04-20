@@ -18,6 +18,7 @@ help:
 	@echo "Targets:"
 	@echo "  setup-env        Create .env file from .env.example if it doesn't exist."
 	@echo "                   After running, use 'source .env' to load variables into your shell."
+	@echo "		   Remember to update the .env file with your own values."
 	@echo "  download-dump    Download the IATI Postgres dump file (-N flag used)."
 	@echo "  clone-schemas    Clone the IATI-Schemas repository into additional-resource/."
 	@echo ""

@@ -11,6 +11,7 @@ scripts = [
     "load_published_organisations.py",
     "load_phantom_activities.py",
     "load_phantom_organisations.py",
+    "load_hierarchy_edges.py",
     "load_participation_edges.py",
     "load_financial_edges.py",
 ]
