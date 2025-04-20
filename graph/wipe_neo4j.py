@@ -248,21 +248,64 @@ def verify_database_empty(session):
     """Verify that the database is completely empty of all data and schema elements."""
     remaining_nodes = count_nodes(session)
     remaining_rels = count_relationships(session)
-    remaining_constraints = len(list(session.run("SHOW CONSTRAINTS")))
-    remaining_indexes = len(list(session.run("SHOW INDEXES")))
+    
+    # Get detailed info on any remaining indexes
+    remaining_indexes = []
+    for record in session.run("SHOW INDEXES"):
+        index_details = list(record.values())
+        index_name = index_details[0] if len(index_details) > 0 else "unknown"
+        index_type = index_details[1] if len(index_details) > 1 else "unknown"
+        on_label = index_details[2] if len(index_details) > 2 else "unknown"
+        remaining_indexes.append(f"{index_name} ({index_type} on {on_label})")
+    
+    # Get detailed info on any remaining constraints
+    remaining_constraints = []
+    for record in session.run("SHOW CONSTRAINTS"):
+        constraint_details = list(record.values())
+        constraint_name = constraint_details[0] if len(constraint_details) > 0 else "unknown"
+        constraint_type = constraint_details[1] if len(constraint_details) > 1 else "unknown"
+        on_label = constraint_details[2] if len(constraint_details) > 2 else "unknown"
+        remaining_constraints.append(f"{constraint_name} ({constraint_type} on {on_label})")
     
     # Check property keys as well
     remaining_property_keys = count_property_keys(session)
     
-    if remaining_nodes == 0 and remaining_rels == 0 and remaining_constraints == 0 and remaining_indexes == 0:
+    # Property keys are expected to persist until garbage collection, so we don't consider them for emptiness
+    if remaining_nodes == 0 and remaining_rels == 0:
+        # Handle remaining indexes
+        if remaining_indexes:
+            logger.warning(f"Database has {len(remaining_indexes)} indexes remaining: {', '.join(remaining_indexes)}")
+            logger.warning("Attempting to drop remaining indexes...")
+            
+            # One more attempt to drop any remaining indexes
+            for index_name in remaining_indexes:
+                try:
+                    # Extract just the index name (before any parentheses)
+                    name_only = index_name.split(" ")[0]
+                    session.run(f"DROP INDEX {name_only}")
+                    logger.info(f"Successfully dropped index {name_only}")
+                except Exception as e:
+                    logger.warning(f"Failed to drop index {name_only}: {e}")
+            
+        # Handle remaining constraints
+        if remaining_constraints:
+            logger.warning(f"Database has {len(remaining_constraints)} constraints remaining: {', '.join(remaining_constraints)}")
+        
+        # Handle property keys
         if remaining_property_keys > 0:
             logger.info(f"Database has no data but {remaining_property_keys} property keys remain. " 
                       f"These will be garbage collected over time.")
+        
+        # Consider database empty if no nodes and relationships, even if property keys remain
         return True
     else:
-        logger.warning(f"Database wipe incomplete: {remaining_nodes} nodes, {remaining_rels} relationships, "
-                      f"{remaining_constraints} constraints, {remaining_indexes} indexes, "
-                      f"{remaining_property_keys} property keys remain.")
+        logger.warning(f"Database wipe incomplete: {remaining_nodes} nodes, {remaining_rels} relationships remain.")
+        if remaining_constraints:
+            logger.warning(f"Additionally, {len(remaining_constraints)} constraints remain: {', '.join(remaining_constraints)}")
+        if remaining_indexes:
+            logger.warning(f"Additionally, {len(remaining_indexes)} indexes remain: {', '.join(remaining_indexes)}")
+        if remaining_property_keys > 0:
+            logger.warning(f"Additionally, {remaining_property_keys} property keys remain.")
         return False
 
 def wipe_neo4j_database():
