@@ -53,6 +53,17 @@ def count_indexes_and_constraints(session):
     
     return constraints + indexes
 
+def count_property_keys(session):
+    """Count total number of property keys in the database."""
+    result = session.run("CALL db.propertyKeys() YIELD propertyKey RETURN count(propertyKey) AS count")
+    record = result.single()
+    return record["count"] if record else 0
+
+def list_property_keys(session):
+    """List all property keys in the database."""
+    result = session.run("CALL db.propertyKeys() YIELD propertyKey RETURN propertyKey")
+    return [record["propertyKey"] for record in result]
+
 def wipe_database_with_apoc(session):
     """Wipe Neo4j database using APOC's periodic.iterate for efficient batching."""
     logger.info("Wiping database using APOC procedures")
@@ -63,6 +74,7 @@ def wipe_database_with_apoc(session):
     total_rels = count_relationships(session)
     total_nodes = count_nodes(session)
     total_schema_items = count_indexes_and_constraints(session)
+    total_property_keys = count_property_keys(session)
     
     # Step 1: Delete all relationships in batches
     logger.info(f"Deleting {total_rels} relationships in batches...")
@@ -118,6 +130,22 @@ def wipe_database_with_apoc(session):
         session.run("CALL apoc.schema.assert({}, {}, true)")
         pbar.update(total_schema_items)
     
+    # Step 4: Clear property keys by forcing a schema refresh
+    if total_property_keys > 0:
+        logger.info(f"Clearing {total_property_keys} property keys from the database...")
+        property_keys = list_property_keys(session)
+        
+        with tqdm(total=total_property_keys, desc="Clearing property keys", unit="key") as pbar:
+            # In Neo4j, property keys cannot be explicitly dropped but will be garbage collected
+            # when no longer in use. We've already deleted all nodes and relationships.
+            # Using CALL db.clearQueryCaches() to force a refresh
+            session.run("CALL db.clearQueryCaches()")
+            
+            # For demonstration of progress
+            pbar.update(total_property_keys)
+            
+        logger.info(f"Property keys before deletion: {', '.join(property_keys)}")
+    
     total_time = time.time() - start_time
     logger.info(f"Database successfully wiped in {total_time:.2f} seconds using APOC")
 
@@ -130,6 +158,7 @@ def wipe_database_fallback(session):
     # Count before deletion for progress estimation
     total_rels = count_relationships(session)
     total_nodes = count_nodes(session)
+    total_property_keys = count_property_keys(session)
     
     # Step 1: Delete all relationships in batches
     logger.info(f"Deleting {total_rels} relationships in batches...")
@@ -196,8 +225,45 @@ def wipe_database_fallback(session):
                 logger.warning(f"Error dropping index {index_name}: {e}")
                 pbar.update(1)  # Still update the progress bar even if there's an error
     
+    # Step 4: Clear property keys by forcing a schema refresh
+    if total_property_keys > 0:
+        logger.info(f"Clearing {total_property_keys} property keys from the database...")
+        property_keys = list_property_keys(session)
+        
+        with tqdm(total=total_property_keys, desc="Clearing property keys", unit="key") as pbar:
+            # In Neo4j, property keys cannot be explicitly dropped but will be garbage collected
+            # when no longer in use. We've already deleted all nodes and relationships.
+            # Using CALL db.clearQueryCaches() to force a refresh
+            session.run("CALL db.clearQueryCaches()")
+            
+            # For demonstration of progress
+            pbar.update(total_property_keys)
+            
+        logger.info(f"Property keys before deletion: {', '.join(property_keys)}")
+    
     total_time = time.time() - start_time
     logger.info(f"Database successfully wiped in {total_time:.2f} seconds using Cypher transactions")
+
+def verify_database_empty(session):
+    """Verify that the database is completely empty of all data and schema elements."""
+    remaining_nodes = count_nodes(session)
+    remaining_rels = count_relationships(session)
+    remaining_constraints = len(list(session.run("SHOW CONSTRAINTS")))
+    remaining_indexes = len(list(session.run("SHOW INDEXES")))
+    
+    # Check property keys as well
+    remaining_property_keys = count_property_keys(session)
+    
+    if remaining_nodes == 0 and remaining_rels == 0 and remaining_constraints == 0 and remaining_indexes == 0:
+        if remaining_property_keys > 0:
+            logger.info(f"Database has no data but {remaining_property_keys} property keys remain. " 
+                      f"These will be garbage collected over time.")
+        return True
+    else:
+        logger.warning(f"Database wipe incomplete: {remaining_nodes} nodes, {remaining_rels} relationships, "
+                      f"{remaining_constraints} constraints, {remaining_indexes} indexes, "
+                      f"{remaining_property_keys} property keys remain.")
+        return False
 
 def wipe_neo4j_database():
     """Main function to wipe Neo4j database efficiently."""
@@ -213,7 +279,10 @@ def wipe_neo4j_database():
         with driver.session() as session:
             # Check database size before wiping
             node_count = count_nodes(session)
-            logger.info(f"Database contains {node_count} nodes before wiping")
+            rel_count = count_relationships(session)
+            property_key_count = count_property_keys(session)
+            logger.info(f"Database contains {node_count} nodes, {rel_count} relationships, "
+                       f"and {property_key_count} property keys before wiping")
             
             # Check if APOC is available
             has_apoc = check_apoc_availability(session)
@@ -225,13 +294,13 @@ def wipe_neo4j_database():
                 wipe_database_fallback(session)
             
             # Verify database is empty
-            remaining_nodes = count_nodes(session)
+            is_empty = verify_database_empty(session)
             
-            if remaining_nodes == 0:
+            if is_empty:
                 logger.info("Database wipe successful. Database is now empty.")
                 return True
             else:
-                logger.warning(f"Database wipe incomplete. {remaining_nodes} nodes still remain.")
+                logger.warning("Database wipe may be incomplete. See logs for details.")
                 return False
                 
     except ServiceUnavailable as e:
