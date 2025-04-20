@@ -282,7 +282,8 @@ def verify_database_empty(session):
                 try:
                     # Extract just the index name (before any parentheses)
                     name_only = index_name.split(" ")[0]
-                    session.run(f"DROP INDEX {name_only}")
+                    # Add backticks around the index name to handle numeric index names
+                    session.run(f"DROP INDEX `{name_only}`")
                     logger.info(f"Successfully dropped index {name_only}")
                 except Exception as e:
                     logger.warning(f"Failed to drop index {name_only}: {e}")
