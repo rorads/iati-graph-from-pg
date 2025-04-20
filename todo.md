@@ -2,45 +2,9 @@
 
 - ✅ **[COMPLETED]** ~~**Graph Structure Note:** The current Neo4j graph model does not contain direct `(:PublishedActivity)-[:FINANCIAL_TRANSACTION]->(:PublishedActivity)` relationships. Financial transactions appear to link Organisations (Published/Phantom) to the PublishedActivities involved, typically representing the recipient organisation receiving funds *to* the activity, or the provider organisation disbursing funds *to* the activity. This needs to be considered when defining and querying funding chains.~~ Implemented a new `FUNDS` relationship that creates direct connections between activities, aggregating all relevant transaction types into a single directional relationship.
 
-- **Implement Efficient Database Wipe Functionality:** Create a Python utility that can safely and efficiently wipe the Neo4j database without hitting memory limits. This should:
-  1. Use a batched approach with APOC's periodic iterate to delete relationships first
-  2. Then delete nodes in batches
-  3. Finally remove all indexes and constraints
-  4. Include proper error handling and logging
-  
-  Implementation should follow best practices for Neo4j 4.x+:
-  ```python
-  # First delete relationships in batches
-  CALL apoc.periodic.iterate(
-      'MATCH ()-[r]->() RETURN r', 
-      'DELETE r', 
-      {batchSize:10000}
-  )
-  
-  # Then delete nodes in batches
-  CALL apoc.periodic.iterate(
-      'MATCH (n) RETURN n', 
-      'DETACH DELETE n', 
-      {batchSize:5000}
-  )
-  
-  # Finally clean up schema
-  CALL apoc.schema.assert({},{},true)
-  ```
-  
-  For cases where APOC isn't available, implement a fallback using Cypher's `CALL {...} IN TRANSACTIONS` feature:
-  ```
-  :auto MATCH ()-[r]->() 
-  CALL { WITH r DELETE r } 
-  IN TRANSACTIONS OF 10000 ROWS;
-  
-  :auto MATCH (n) 
-  CALL { WITH n DETACH DELETE n } 
-  IN TRANSACTIONS OF 5000 ROWS;
-  ```
+- ✅ **[COMPLETED]** ~~**Implement Efficient Database Wipe Functionality:** Create a Python utility that can safely and efficiently wipe the Neo4j database without hitting memory limits. This should use a batched approach to delete relationships first, then nodes, and finally remove all indexes and constraints with proper error handling and logging.~~
 
-
-- **Add Activity Hierarchy Relationships:** Create a new table and relationships in Neo4j that capture parent/child/sibling connections between activities. These need to be implemented efficiently with one row per relationship (parent-child, sibling-sibling). The edge should include attributes that record how the relationship was established (which activity declared the relationship). The model should account for both directional (parent-child) and reflexive (sibling) relationships, and should consider both published and phantom activities.
+- **Improve Activity Hierarchy Relationships:** We have a first iteration of hierarchy relationships, but need to: a) refactor the implementation to use separate edge types for parent-child and sibling relationships instead of a single HIERARCHY edge with a relationship_type property, and b) optimise performance of the loading process. These changes should be made in the Python script (load_hierarchy_edges.py) rather than in the DBT model. The implementation should maintain the current functionality of recording which activities declared each relationship whilst improving query performance in Neo4j.
 
 - **Add Activity Participation Relationships:** Implement a new "participating activity" relationship in Neo4j to capture where an activity is declared as the `activityid` in a participatingorg row. This will potentially duplicate some financial relationships but will serve as a useful checksum. Implementation should involve:
   1. Creating a new DBT model to identify these relationships
