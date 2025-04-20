@@ -280,13 +280,56 @@ def verify_database_empty(session):
             # One more attempt to drop any remaining indexes
             for index_name in remaining_indexes:
                 try:
-                    # Extract just the index name (before any parentheses)
-                    name_only = index_name.split(" ")[0]
-                    # Add backticks around the index name to handle numeric index names
-                    session.run(f"DROP INDEX `{name_only}`")
-                    logger.info(f"Successfully dropped index {name_only}")
+                    # Parse the index information to get both ID and actual name
+                    parts = index_name.split(" ")
+                    id_part = parts[0]
+                    
+                    # Try to extract the actual index name (typically between parentheses)
+                    actual_name = None
+                    if len(parts) > 1 and "(" in index_name and ")" in index_name:
+                        # Extract text between parentheses
+                        start = index_name.find("(") + 1
+                        end = index_name.find(")")
+                        if start > 0 and end > start:
+                            parts_in_parens = index_name[start:end].split(" ")
+                            if len(parts_in_parens) > 0:
+                                actual_name = parts_in_parens[0]  # First word in parentheses
+                    
+                    # Try dropping with various name formats
+                    success = False
+                    
+                    # Try the ID with backticks first (often works for system indexes)
+                    try:
+                        session.run(f"DROP INDEX `{id_part}`")
+                        logger.info(f"Successfully dropped index {id_part}")
+                        success = True
+                    except Exception as e:
+                        logger.debug(f"Couldn't drop index using ID `{id_part}`: {e}")
+                    
+                    # If that failed and we have an actual name, try that
+                    if not success and actual_name:
+                        try:
+                            # Try without backticks first (for named indexes)
+                            session.run(f"DROP INDEX {actual_name}")
+                            logger.info(f"Successfully dropped index {actual_name}")
+                            success = True
+                        except Exception as e:
+                            logger.debug(f"Couldn't drop index using name {actual_name}: {e}")
+                            
+                            # Try with backticks (for special characters/spaces)
+                            try:
+                                session.run(f"DROP INDEX `{actual_name}`")
+                                logger.info(f"Successfully dropped index `{actual_name}`")
+                                success = True
+                            except Exception as e2:
+                                logger.debug(f"Couldn't drop index using name `{actual_name}`: {e2}")
+                    
+                    # If all attempts failed, log a warning
+                    if not success:
+                        logger.warning(f"Failed to drop index {index_name} after multiple attempts")
+                
                 except Exception as e:
-                    logger.warning(f"Failed to drop index {name_only}: {e}")
+                    logger.warning(f"Error during index removal for {index_name}: {e}")
             
         # Handle remaining constraints
         if remaining_constraints:
