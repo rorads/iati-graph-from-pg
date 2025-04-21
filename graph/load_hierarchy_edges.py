@@ -2,7 +2,7 @@
 """
 graph/load_hierarchy_edges.py
 
-Loads hierarchy edges (parent-child and sibling) between activities into Neo4j.
+Loads parent-child relationships between activities into Neo4j.
 """
 import os
 import sys
@@ -18,7 +18,7 @@ from db_utils import get_neo4j_driver, get_postgres_connection
 # --- Configuration ---
 DBT_TARGET_SCHEMA = "iati_graph"
 SOURCE_TABLE = "hierarchy_links"
-NEO4J_EDGE_TYPE = "HIERARCHY"
+NEO4J_EDGE_TYPE = "PARENT_OF"
 
 # Node labels for source and target
 ACTIVITY_LABEL = "PublishedActivity"
@@ -48,8 +48,8 @@ EDGE_PROPERTY_COLUMNS = [
 DEFAULT_BATCH_SIZE = 1000
 
 # Log files
-DETAILS_LOG = "hierarchy_edges_skipped_details.log"
-SUMMARY_LOG = "hierarchy_edges_skipped_summary.log"
+DETAILS_LOG = "parent_child_edges_skipped_details.log"
+SUMMARY_LOG = "parent_child_edges_skipped_summary.log"
 
 def get_pg_count(pg_conn, schema, table):
     """Gets the total row count from a PostgreSQL table."""
@@ -77,7 +77,7 @@ def get_neo4j_edge_count(neo4j_driver, edge_type):
         return None
 
 def load_hierarchy_edges(pg_conn, neo4j_driver, batch_size):
-    """Loads hierarchy edges from PostgreSQL to Neo4j."""
+    """Loads parent-child relationships from PostgreSQL to Neo4j."""
     print(f"--- Loading Edges: {DBT_TARGET_SCHEMA}.{SOURCE_TABLE} -> :{NEO4J_EDGE_TYPE} ---")
 
     # 1. Get expected count
@@ -102,29 +102,27 @@ def load_hierarchy_edges(pg_conn, neo4j_driver, batch_size):
     MERGE (src:{ACTIVITY_LABEL} {{ iatiidentifier: $src }})
     MERGE (tgt:{ACTIVITY_LABEL} {{ iatiidentifier: $tgt }})
     MERGE (src)-[rel:{NEO4J_EDGE_TYPE}]->(tgt)
-    SET rel.{REL_TYPE_COL} = $rtype,
-        rel.{DECLARED_BY_COL} = $declared
+    SET rel.{DECLARED_BY_COL} = $declared
     """
 
     merged = 0
-    for row in tqdm(cursor, total=expected, desc="Loading hierarchy edges"):
+    for row in tqdm(cursor, total=expected, desc="Loading parent-child edges"):
         src = row[SOURCE_NODE_ID_COL]
         tgt = row[TARGET_NODE_ID_COL]
-        rtype = row[REL_TYPE_COL]
         declared = row[DECLARED_BY_COL]
         # Skip invalid
         if not src or not tgt:
             continue
         try:
             with neo4j_driver.session() as session:
-                session.run(cypher, src=src, tgt=tgt, rtype=rtype, declared=declared)
+                session.run(cypher, src=src, tgt=tgt, declared=declared)
             merged += 1
         except Exception as e:
             print(f"Error creating edge {src}->{tgt}: {e}", file=sys.stderr)
             continue
 
     after = get_neo4j_edge_count(neo4j_driver, NEO4J_EDGE_TYPE)
-    print(f"--- Finished loading hierarchy edges. Merged: {merged} (before: {before}, after: {after}) ---")
+    print(f"--- Finished loading parent-child edges. Merged: {merged} (before: {before}, after: {after}) ---")
 
 def main():
     pg_conn = get_postgres_connection()
