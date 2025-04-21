@@ -47,11 +47,12 @@ EDGE_PROPERTY_COLUMNS = [
 ]
 
 # Processing Batch Size
-DEFAULT_BATCH_SIZE = 500 
+DEFAULT_BATCH_SIZE = 500
 
 # Log file for skipped edge details
-SKIPPED_DETAILS_LOG_FILENAME = "funds_edges_skipped_details.log"
-SUMMARY_LOG_FILENAME = "funds_edges_skipped_summary.log"
+LOG_DIR = "graph/logs" # Define log directory
+SKIPPED_DETAILS_LOG_FILENAME = os.path.join(LOG_DIR, "funds_edges_skipped_details.log")
+SUMMARY_LOG_FILENAME = os.path.join(LOG_DIR, "funds_edges_skipped_summary.log")
 
 def check_node_existence(neo4j_driver, pg_conn, batch_size=100):
     """Samples IDs and checks node existence to help debug missing nodes."""

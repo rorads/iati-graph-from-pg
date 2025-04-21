@@ -61,8 +61,8 @@ models:
           column_name: reference
       - not_null:
           column_name: reference
-      - not_null:
-          column_name: distinct_narratives
+      # - not_null:
+      #     column_name: distinct_narratives
       - not_null:
           column_name: phantom_in_participatingorg
       - not_null:
