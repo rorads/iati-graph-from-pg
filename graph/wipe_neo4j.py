@@ -64,182 +64,272 @@ def list_property_keys(session):
     result = session.run("CALL db.propertyKeys() YIELD propertyKey RETURN propertyKey")
     return [record["propertyKey"] for record in result]
 
-def wipe_database_with_apoc(session):
+def wipe_database_with_apoc(driver):
     """Wipe Neo4j database using APOC's periodic.iterate for efficient batching."""
     logger.info("Wiping database using APOC procedures")
     
     start_time = time.time()
     
-    # Count relationships before deletion for progress estimation
-    total_rels = count_relationships(session)
-    total_nodes = count_nodes(session)
-    total_schema_items = count_indexes_and_constraints(session)
-    total_property_keys = count_property_keys(session)
+    # Count relationships and nodes before deletion for progress estimation
+    with driver.session() as session:
+        total_rels = count_relationships(session)
+        total_nodes = count_nodes(session)
+        total_schema_items = count_indexes_and_constraints(session)
+        total_property_keys = count_property_keys(session)
     
+    rel_start_time = time.time()
     # Step 1: Delete all relationships in batches
     logger.info(f"Deleting {total_rels} relationships in batches...")
     
-    # Create a progress bar for relationships
     with tqdm(total=total_rels, desc="Deleting relationships", unit="rel") as pbar:
-        result = session.run("""
-            CALL apoc.periodic.iterate(
-                'MATCH ()-[r]->() RETURN r',
-                'DELETE r',
-                {batchSize: 10000, parallel: false}
-            )
-            YIELD batches, total, timeTaken, committedOperations
-            RETURN batches, total, timeTaken, committedOperations
-        """)
-        
-        relationship_stats = result.single()
-        # Update progress bar to completion
-        pbar.update(total_rels)
-        
-    logger.info(f"Deleted {relationship_stats['total']} relationships in "
-                f"{relationship_stats['batches']} batches. "
-                f"Time taken: {relationship_stats['timeTaken']} ms")
-    
+        if total_rels > 0:
+            deleted_rels = 0
+            batch_size = 10000
+            with driver.session() as session:
+                while True:
+                    # Call periodic.iterate to delete a batch
+                    result = session.run("""
+                        CALL apoc.periodic.iterate(
+                            'MATCH ()-[r]->() WITH r LIMIT $batch_size RETURN r',
+                            'DELETE r',
+                            {batchSize: $batch_size, parallel: false, params: {batch_size: $batch_size}}
+                        )
+                        YIELD committedOperations, batches, timeTaken
+                        RETURN committedOperations, batches, timeTaken
+                    """, batch_size=batch_size)
+                    
+                    stats = result.single()
+                    committed_ops = stats["committedOperations"]
+                    
+                    if committed_ops == 0:
+                        break  # No more relationships found
+                    
+                    # Update progress based on committed operations
+                    pbar.update(committed_ops)
+                    deleted_rels += committed_ops
+                    
+                    # Exit if we've deleted more than the initial count (shouldn't happen)
+                    if deleted_rels >= total_rels:
+                        break
+                
+                # Final check to ensure the bar is full
+                final_rel_count = count_relationships(session)
+                pbar.n = total_rels - final_rel_count
+                pbar.refresh()
+        else:
+            pbar.update(0) # Already empty
+            
+    rel_time_taken = int((time.time() - rel_start_time) * 1000)
+    logger.info(f"Deleted {total_rels} relationships. Time taken: {rel_time_taken} ms")
+
+    node_start_time = time.time()
     # Step 2: Delete all nodes in batches
     logger.info(f"Deleting {total_nodes} nodes in batches...")
     
-    # Create a progress bar for nodes
     with tqdm(total=total_nodes, desc="Deleting nodes", unit="node") as pbar:
-        result = session.run("""
-            CALL apoc.periodic.iterate(
-                'MATCH (n) RETURN n',
-                'DETACH DELETE n',
-                {batchSize: 5000, parallel: false}
-            )
-            YIELD batches, total, timeTaken, committedOperations
-            RETURN batches, total, timeTaken, committedOperations
-        """)
-        
-        node_stats = result.single()
-        # Update progress bar to completion
-        pbar.update(total_nodes)
+        if total_nodes > 0:
+            deleted_nodes = 0
+            batch_size = 5000
+            with driver.session() as session:
+                while True:
+                    # Call periodic.iterate to delete a batch of nodes
+                    result = session.run("""
+                        CALL apoc.periodic.iterate(
+                            'MATCH (n) WITH n LIMIT $batch_size RETURN n',
+                            'DETACH DELETE n',
+                            {batchSize: $batch_size, parallel: false, params: {batch_size: $batch_size}}
+                        )
+                        YIELD committedOperations, batches, timeTaken
+                        RETURN committedOperations, batches, timeTaken
+                    """, batch_size=batch_size)
+                    
+                    stats = result.single()
+                    committed_ops = stats["committedOperations"]
+                    
+                    if committed_ops == 0:
+                        break # No more nodes found
+                    
+                    # Update progress based on committed operations
+                    pbar.update(committed_ops)
+                    deleted_nodes += committed_ops
+
+                    # Exit if we've deleted more than the initial count
+                    if deleted_nodes >= total_nodes:
+                        break
+
+                # Final check to ensure the bar is full
+                final_node_count = count_nodes(session)
+                pbar.n = total_nodes - final_node_count
+                pbar.refresh()
+        else:
+            pbar.update(0) # Already empty
     
-    logger.info(f"Deleted {node_stats['total']} nodes in "
-                f"{node_stats['batches']} batches. "
-                f"Time taken: {node_stats['timeTaken']} ms")
+    node_time_taken = int((time.time() - node_start_time) * 1000)
+    logger.info(f"Deleted {total_nodes} nodes. Time taken: {node_time_taken} ms")
     
     # Step 3: Clean up schema (indexes and constraints)
     logger.info("Cleaning up schema (dropping indexes and constraints)...")
     
-    # Create a progress bar for schema cleanup
     with tqdm(total=total_schema_items, desc="Cleaning up schema", unit="item") as pbar:
-        session.run("CALL apoc.schema.assert({}, {}, true)")
-        pbar.update(total_schema_items)
+        if total_schema_items > 0:
+            with driver.session() as session:
+                session.run("CALL apoc.schema.assert({}, {}, true)")
+                pbar.update(total_schema_items)
+        else:
+            pbar.update(0)
     
     # Step 4: Clear property keys by forcing a schema refresh
     if total_property_keys > 0:
         logger.info(f"Clearing {total_property_keys} property keys from the database...")
-        property_keys = list_property_keys(session)
+        
+        with driver.session() as session:
+            property_keys_before = list_property_keys(session)
         
         with tqdm(total=total_property_keys, desc="Clearing property keys", unit="key") as pbar:
-            # In Neo4j, property keys cannot be explicitly dropped but will be garbage collected
-            # when no longer in use. We've already deleted all nodes and relationships.
-            # Using CALL db.clearQueryCaches() to force a refresh
-            session.run("CALL db.clearQueryCaches()")
-            
-            # For demonstration of progress
+            with driver.session() as session:
+                session.run("CALL db.clearQueryCaches()")
             pbar.update(total_property_keys)
             
-        logger.info(f"Property keys before deletion: {', '.join(property_keys)}")
+        logger.info(f"Property keys before potential clearing: {', '.join(property_keys_before)}")
     
     total_time = time.time() - start_time
     logger.info(f"Database successfully wiped in {total_time:.2f} seconds using APOC")
 
-def wipe_database_fallback(session):
-    """Wipe Neo4j database using CALL {...} IN TRANSACTIONS for when APOC is not available."""
+def wipe_database_fallback(driver):
+    """Wipe Neo4j database using simple Cypher queries for when APOC is not available."""
     logger.info("Wiping database using Cypher transactions (APOC not available)")
     
     start_time = time.time()
     
     # Count before deletion for progress estimation
-    total_rels = count_relationships(session)
-    total_nodes = count_nodes(session)
-    total_property_keys = count_property_keys(session)
-    
+    with driver.session() as session:
+        total_rels = count_relationships(session)
+        total_nodes = count_nodes(session)
+        total_property_keys = count_property_keys(session)
+
     # Step 1: Delete all relationships in batches
     logger.info(f"Deleting {total_rels} relationships in batches...")
-    
-    # Create a progress bar for relationship deletion
+    rel_start_time = time.time()
     with tqdm(total=total_rels, desc="Deleting relationships", unit="rel") as pbar:
-        # For transactions, we can't easily track progress in real-time
-        # So we'll use a pseudo-progress approach
-        session.run("""
-            :auto MATCH ()-[r]->() 
-            CALL { WITH r DELETE r } 
-            IN TRANSACTIONS OF 10000 ROWS
-        """)
-        # After completion, update progress bar to 100%
-        pbar.update(total_rels)
-    
-    # Step 2: Delete all nodes
+        if total_rels > 0:
+            deleted_rels_count = 0
+            batch_size = 10000
+            with driver.session() as session:
+                while True:
+                    # Delete a batch and get the count of deleted relationships
+                    result = session.run("""
+                        MATCH ()-[r]->() WITH r LIMIT $batch_size
+                        DELETE r RETURN count(r) AS deleted_count
+                    """, batch_size=batch_size)
+                    
+                    deleted_in_batch = result.single()["deleted_count"]
+                    
+                    if deleted_in_batch == 0:
+                        break # No more relationships to delete
+                    
+                    pbar.update(deleted_in_batch)
+                    deleted_rels_count += deleted_in_batch
+
+                # Final check
+                final_rel_count = count_relationships(session)
+                pbar.n = total_rels - final_rel_count
+                pbar.refresh()
+        else:
+            pbar.update(0)
+
+    rel_time_taken = int((time.time() - rel_start_time) * 1000)
+    logger.info(f"Deleted {total_rels} relationships. Time taken: {rel_time_taken} ms")
+
+    # Step 2: Delete all nodes in batches
     logger.info(f"Deleting {total_nodes} nodes in batches...")
-    
-    # Create a progress bar for node deletion
+    node_start_time = time.time()
     with tqdm(total=total_nodes, desc="Deleting nodes", unit="node") as pbar:
-        session.run("""
-            :auto MATCH (n) 
-            CALL { WITH n DETACH DELETE n } 
-            IN TRANSACTIONS OF 5000 ROWS
-        """)
-        # After completion, update progress bar to 100%
-        pbar.update(total_nodes)
-    
+        if total_nodes > 0:
+            deleted_nodes_count = 0
+            batch_size = 5000
+            with driver.session() as session:
+                while True:
+                    # Delete a batch and get the count of deleted nodes
+                    result = session.run("""
+                        MATCH (n) WITH n LIMIT $batch_size
+                        DETACH DELETE n RETURN count(n) AS deleted_count
+                    """, batch_size=batch_size)
+                    
+                    deleted_in_batch = result.single()["deleted_count"]
+                    
+                    if deleted_in_batch == 0:
+                        break # No more nodes to delete
+                    
+                    pbar.update(deleted_in_batch)
+                    deleted_nodes_count += deleted_in_batch
+                
+                # Final check
+                final_node_count = count_nodes(session)
+                pbar.n = total_nodes - final_node_count
+                pbar.refresh()
+        else:
+            pbar.update(0)
+
+    node_time_taken = int((time.time() - node_start_time) * 1000)
+    logger.info(f"Deleted {total_nodes} nodes. Time taken: {node_time_taken} ms")
+
     # Step 3: Clean up schema (requires manual dropping of indexes and constraints)
     logger.info("Cleaning up schema (dropping indexes and constraints)...")
     
-    # Get all constraints
-    result = session.run("SHOW CONSTRAINTS")
-    constraints = list(result)
-    
-    # Get all indexes
-    result = session.run("SHOW INDEXES")
-    indexes = list(result)
-    
-    total_schema_items = len(constraints) + len(indexes)
-    
-    # Create a progress bar for schema cleanup
-    with tqdm(total=total_schema_items, desc="Cleaning up schema", unit="item") as pbar:
-        # Drop constraints
-        for constraint in constraints:
-            try:
-                constraint_name = constraint[0] if isinstance(constraint, list) else constraint
-                logger.info(f"Dropping constraint: {constraint_name}")
-                session.run(f"DROP CONSTRAINT {constraint_name}")
-                pbar.update(1)
-            except Exception as e:
-                logger.warning(f"Error dropping constraint {constraint_name}: {e}")
-                pbar.update(1)  # Still update the progress bar even if there's an error
+    with driver.session() as session:
+        # Get all constraints
+        result = session.run("SHOW CONSTRAINTS YIELD name")
+        constraints = [record["name"] for record in result]
         
-        # Drop indexes
-        for index in indexes:
-            try:
-                index_name = index[0] if isinstance(index, list) else index
-                logger.info(f"Dropping index: {index_name}")
-                session.run(f"DROP INDEX {index_name}")
-                pbar.update(1)
-            except Exception as e:
-                logger.warning(f"Error dropping index {index_name}: {e}")
-                pbar.update(1)  # Still update the progress bar even if there's an error
-    
-    # Step 4: Clear property keys by forcing a schema refresh
-    if total_property_keys > 0:
-        logger.info(f"Clearing {total_property_keys} property keys from the database...")
-        property_keys = list_property_keys(session)
+        # Get all indexes (excluding composite and lookup indexes for now)
+        result = session.run("SHOW INDEXES YIELD name WHERE type = 'RANGE' OR type = 'POINT' OR type = 'TEXT' OR type = 'FULLTEXT'")
+        indexes = [record["name"] for record in result]
         
-        with tqdm(total=total_property_keys, desc="Clearing property keys", unit="key") as pbar:
-            # In Neo4j, property keys cannot be explicitly dropped but will be garbage collected
-            # when no longer in use. We've already deleted all nodes and relationships.
-            # Using CALL db.clearQueryCaches() to force a refresh
-            session.run("CALL db.clearQueryCaches()")
+        total_schema_items = len(constraints) + len(indexes)
+        
+        with tqdm(total=total_schema_items, desc="Cleaning up schema", unit="item") as pbar:
+            # Drop constraints
+            for constraint_name in constraints:
+                try:
+                    logger.debug(f"Dropping constraint: {constraint_name}")
+                    session.run(f"DROP CONSTRAINT {constraint_name}")
+                    pbar.update(1)
+                except Exception as e:
+                    # Constraint names might have special chars, try quoting
+                    try:
+                        logger.debug(f"Retrying dropping constraint with quotes: `{constraint_name}`")
+                        session.run(f'DROP CONSTRAINT `{constraint_name}`')
+                        pbar.update(1)
+                    except Exception as e2:
+                        logger.warning(f"Error dropping constraint {constraint_name}: {e} / {e2}")
+                        pbar.update(1) # Still update progress
             
-            # For demonstration of progress
-            pbar.update(total_property_keys)
+            # Drop indexes
+            for index_name in indexes:
+                try:
+                    logger.debug(f"Dropping index: {index_name}")
+                    session.run(f"DROP INDEX {index_name}")
+                    pbar.update(1)
+                except Exception as e:
+                    # Index names might have special chars, try quoting
+                    try:
+                        logger.debug(f"Retrying dropping index with quotes: `{index_name}`")
+                        session.run(f'DROP INDEX `{index_name}`')
+                        pbar.update(1)
+                    except Exception as e2:
+                        logger.warning(f"Error dropping index {index_name}: {e} / {e2}")
+                        pbar.update(1) # Still update progress
+        
+        # Step 4: Clear property keys by forcing a schema refresh
+        if total_property_keys > 0:
+            logger.info(f"Clearing {total_property_keys} property keys from the database...")
+            property_keys_before = list_property_keys(session)
             
-        logger.info(f"Property keys before deletion: {', '.join(property_keys)}")
+            with tqdm(total=total_property_keys, desc="Clearing property keys", unit="key") as pbar:
+                session.run("CALL db.clearQueryCaches()")
+                pbar.update(total_property_keys)
+                
+            logger.info(f"Property keys before potential clearing: {', '.join(property_keys_before)}")
     
     total_time = time.time() - start_time
     logger.info(f"Database successfully wiped in {total_time:.2f} seconds using Cypher transactions")
@@ -250,110 +340,63 @@ def verify_database_empty(session):
     remaining_rels = count_relationships(session)
     
     # Get detailed info on any remaining indexes
-    remaining_indexes = []
-    for record in session.run("SHOW INDEXES"):
-        index_details = list(record.values())
-        index_name = index_details[0] if len(index_details) > 0 else "unknown"
-        index_type = index_details[1] if len(index_details) > 1 else "unknown"
-        on_label = index_details[2] if len(index_details) > 2 else "unknown"
-        remaining_indexes.append(f"{index_name} ({index_type} on {on_label})")
-    
+    remaining_indexes_details = []
+    try:
+        for record in session.run("SHOW INDEXES YIELD name, type, labelsOrTypes, properties"): 
+            remaining_indexes_details.append(f"{record['name']} ({record['type']} on {record['labelsOrTypes']}({', '.join(record['properties'] or [])}))")
+    except Exception as e:
+        logger.warning(f"Could not retrieve full index details: {e}")
+        # Fallback to just names
+        try:
+            for record in session.run("SHOW INDEXES YIELD name"): 
+                remaining_indexes_details.append(record['name'])
+        except Exception as e2:
+            logger.error(f"Could not retrieve index names: {e2}")
+
     # Get detailed info on any remaining constraints
-    remaining_constraints = []
-    for record in session.run("SHOW CONSTRAINTS"):
-        constraint_details = list(record.values())
-        constraint_name = constraint_details[0] if len(constraint_details) > 0 else "unknown"
-        constraint_type = constraint_details[1] if len(constraint_details) > 1 else "unknown"
-        on_label = constraint_details[2] if len(constraint_details) > 2 else "unknown"
-        remaining_constraints.append(f"{constraint_name} ({constraint_type} on {on_label})")
-    
+    remaining_constraints_details = []
+    try:
+        for record in session.run("SHOW CONSTRAINTS YIELD name, type, labelsOrTypes, properties"): 
+             remaining_constraints_details.append(f"{record['name']} ({record['type']} on {record['labelsOrTypes']}({', '.join(record['properties'] or [])}))")
+    except Exception as e:
+        logger.warning(f"Could not retrieve full constraint details: {e}")
+        # Fallback to just names
+        try:
+            for record in session.run("SHOW CONSTRAINTS YIELD name"): 
+                remaining_constraints_details.append(record['name'])
+        except Exception as e2:
+             logger.error(f"Could not retrieve constraint names: {e2}")
+
     # Check property keys as well
     remaining_property_keys = count_property_keys(session)
     
-    # Property keys are expected to persist until garbage collection, so we don't consider them for emptiness
-    if remaining_nodes == 0 and remaining_rels == 0:
-        # Handle remaining indexes
-        if remaining_indexes:
-            logger.warning(f"Database has {len(remaining_indexes)} indexes remaining: {', '.join(remaining_indexes)}")
-            logger.warning("Attempting to drop remaining indexes...")
-            
-            # One more attempt to drop any remaining indexes
-            for index_name in remaining_indexes:
-                try:
-                    # Parse the index information to get both ID and actual name
-                    parts = index_name.split(" ")
-                    id_part = parts[0]
-                    
-                    # Try to extract the actual index name (typically between parentheses)
-                    actual_name = None
-                    if len(parts) > 1 and "(" in index_name and ")" in index_name:
-                        # Extract text between parentheses
-                        start = index_name.find("(") + 1
-                        end = index_name.find(")")
-                        if start > 0 and end > start:
-                            parts_in_parens = index_name[start:end].split(" ")
-                            if len(parts_in_parens) > 0:
-                                actual_name = parts_in_parens[0]  # First word in parentheses
-                    
-                    # Try dropping with various name formats
-                    success = False
-                    
-                    # Try the ID with backticks first (often works for system indexes)
-                    try:
-                        session.run(f"DROP INDEX `{id_part}`")
-                        logger.info(f"Successfully dropped index {id_part}")
-                        success = True
-                    except Exception as e:
-                        logger.debug(f"Couldn't drop index using ID `{id_part}`: {e}")
-                    
-                    # If that failed and we have an actual name, try that
-                    if not success and actual_name:
-                        try:
-                            # Try without backticks first (for named indexes)
-                            session.run(f"DROP INDEX {actual_name}")
-                            logger.info(f"Successfully dropped index {actual_name}")
-                            success = True
-                        except Exception as e:
-                            logger.debug(f"Couldn't drop index using name {actual_name}: {e}")
-                            
-                            # Try with backticks (for special characters/spaces)
-                            try:
-                                session.run(f"DROP INDEX `{actual_name}`")
-                                logger.info(f"Successfully dropped index `{actual_name}`")
-                                success = True
-                            except Exception as e2:
-                                logger.debug(f"Couldn't drop index using name `{actual_name}`: {e2}")
-                    
-                    # If all attempts failed, log a warning
-                    if not success:
-                        logger.warning(f"Failed to drop index {index_name} after multiple attempts")
-                
-                except Exception as e:
-                    logger.warning(f"Error during index removal for {index_name}: {e}")
-            
-        # Handle remaining constraints
-        if remaining_constraints:
-            logger.warning(f"Database has {len(remaining_constraints)} constraints remaining: {', '.join(remaining_constraints)}")
+    is_clean = True
+    if remaining_nodes != 0:
+        logger.warning(f"Database wipe incomplete: {remaining_nodes} nodes remain.")
+        is_clean = False
+    if remaining_rels != 0:
+        logger.warning(f"Database wipe incomplete: {remaining_rels} relationships remain.")
+        is_clean = False
         
-        # Handle property keys
-        if remaining_property_keys > 0:
-            logger.info(f"Database has no data but {remaining_property_keys} property keys remain. " 
-                      f"These will be garbage collected over time.")
+    if remaining_indexes_details:
+        logger.warning(f"Database has {len(remaining_indexes_details)} indexes remaining: {', '.join(remaining_indexes_details)}")
+        # Don't mark as unclean for remaining indexes, as drop might fail for system ones
         
-        # Consider database empty if no nodes and relationships, even if property keys remain
-        return True
-    else:
-        logger.warning(f"Database wipe incomplete: {remaining_nodes} nodes, {remaining_rels} relationships remain.")
-        if remaining_constraints:
-            logger.warning(f"Additionally, {len(remaining_constraints)} constraints remain: {', '.join(remaining_constraints)}")
-        if remaining_indexes:
-            logger.warning(f"Additionally, {len(remaining_indexes)} indexes remain: {', '.join(remaining_indexes)}")
-        if remaining_property_keys > 0:
-            logger.warning(f"Additionally, {remaining_property_keys} property keys remain.")
-        return False
+    if remaining_constraints_details:
+        logger.warning(f"Database has {len(remaining_constraints_details)} constraints remaining: {', '.join(remaining_constraints_details)}")
+        # Don't mark as unclean for remaining constraints, as drop might fail for system ones
+
+    if remaining_property_keys > 0:
+        logger.info(f"Database has {remaining_property_keys} property keys remaining. These will be garbage collected.")
+
+    if is_clean:
+         logger.info("Verified: No nodes or relationships remain.")
+    
+    return is_clean
 
 def wipe_neo4j_database():
     """Main function to wipe Neo4j database efficiently."""
+    driver = None # Ensure driver is defined in finally block scope
     try:
         logger.info("Starting Neo4j database wipe process")
         
@@ -363,32 +406,33 @@ def wipe_neo4j_database():
             logger.error("Failed to connect to Neo4j. Exiting.")
             return False
         
+        # Check database size and APOC availability in one session
         with driver.session() as session:
-            # Check database size before wiping
             node_count = count_nodes(session)
             rel_count = count_relationships(session)
             property_key_count = count_property_keys(session)
             logger.info(f"Database contains {node_count} nodes, {rel_count} relationships, "
                        f"and {property_key_count} property keys before wiping")
             
-            # Check if APOC is available
             has_apoc = check_apoc_availability(session)
             logger.info(f"APOC availability: {'Available' if has_apoc else 'Not available'}")
-            
-            if has_apoc:
-                wipe_database_with_apoc(session)
-            else:
-                wipe_database_fallback(session)
-            
-            # Verify database is empty
+        
+        # Wipe database using appropriate method
+        if has_apoc:
+            wipe_database_with_apoc(driver)
+        else:
+            wipe_database_fallback(driver)
+        
+        # Verify database is empty
+        with driver.session() as session:
             is_empty = verify_database_empty(session)
-            
-            if is_empty:
-                logger.info("Database wipe successful. Database is now empty.")
-                return True
-            else:
-                logger.warning("Database wipe may be incomplete. See logs for details.")
-                return False
+        
+        if is_empty:
+            logger.info("Database wipe successful and verified empty (no nodes/rels). Check logs for schema/key status.")
+            return True
+        else:
+            logger.warning("Database wipe may be incomplete (nodes/rels remain). See logs for details.")
+            return False
                 
     except ServiceUnavailable as e:
         logger.error(f"Neo4j connection error: {e}")
@@ -397,11 +441,11 @@ def wipe_neo4j_database():
         logger.error(f"Neo4j query error: {e}")
         return False
     except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
+        logger.error(f"Unexpected error during wipe: {e}", exc_info=True)
         return False
     finally:
         # Close driver if it exists
-        if 'driver' in locals():
+        if driver:
             driver.close()
             logger.info("Neo4j connection closed")
 
@@ -421,10 +465,10 @@ if __name__ == "__main__":
         print("Starting database wipe process...")
         success = wipe_neo4j_database()
         if success:
-            print("Neo4j database successfully wiped.")
+            print("Neo4j database successfully wiped (verified no nodes/rels). Check logs/neo4j_wipe.log for details.")
             sys.exit(0)
         else:
-            print("Error wiping Neo4j database. Check logs for details.")
+            print("Error wiping Neo4j database. Check logs/neo4j_wipe.log for details.")
             sys.exit(1)
     except KeyboardInterrupt:
         print("\nOperation cancelled by user.")
