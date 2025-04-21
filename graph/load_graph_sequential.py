@@ -13,7 +13,7 @@ scripts = [
     "load_phantom_organisations.py",
     "load_hierarchy_edges.py",
     "load_participation_edges.py",
-    "load_financial_edges.py",
+    "load_funds_edges.py",
 ]
 
 print("Starting sequential graph load process...")

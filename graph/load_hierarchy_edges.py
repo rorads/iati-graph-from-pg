@@ -76,6 +76,36 @@ def get_neo4j_edge_count(neo4j_driver, edge_type):
         print(f"Error getting Neo4j edge count for :{edge_type}: {e}", file=sys.stderr)
         return None
 
+def check_node_exists(pg_conn, activity_id):
+    """Check if an activity ID exists in published_activities or phantom_activities."""
+    published_query = """
+    SELECT COUNT(*) FROM iati_graph.published_activities 
+    WHERE iatiidentifier = %s
+    """
+    phantom_query = """
+    SELECT COUNT(*) FROM iati_graph.phantom_activities 
+    WHERE phantom_activity_identifier = %s
+    """
+    
+    is_published = False
+    is_phantom = False
+    
+    try:
+        with pg_conn.cursor() as cursor:
+            cursor.execute(published_query, (activity_id,))
+            count = cursor.fetchone()[0]
+            if count > 0:
+                is_published = True
+            
+            cursor.execute(phantom_query, (activity_id,))
+            count = cursor.fetchone()[0]
+            if count > 0:
+                is_phantom = True
+    except Exception as e:
+        print(f"Error checking node existence: {e}", file=sys.stderr)
+    
+    return is_published, is_phantom
+
 def load_hierarchy_edges(pg_conn, neo4j_driver, batch_size):
     """Loads parent-child relationships from PostgreSQL to Neo4j."""
     print(f"--- Loading Edges: {DBT_TARGET_SCHEMA}.{SOURCE_TABLE} -> :{NEO4J_EDGE_TYPE} ---")
@@ -98,21 +128,70 @@ def load_hierarchy_edges(pg_conn, neo4j_driver, batch_size):
     cursor.itersize = batch_size
     cursor.execute(query)
 
-    cypher = f"""
-    MERGE (src:{ACTIVITY_LABEL} {{ iatiidentifier: $src }})
-    MERGE (tgt:{ACTIVITY_LABEL} {{ iatiidentifier: $tgt }})
-    MERGE (src)-[rel:{NEO4J_EDGE_TYPE}]->(tgt)
-    SET rel.{DECLARED_BY_COL} = $declared
-    """
+    # Cache for activity type (published or phantom) to avoid repeated DB lookups
+    activity_type_cache = {}
+
+    # Count for tracking purposes
+    phantom_count = 0
+    published_count = 0
+    skipped_count = 0
 
     merged = 0
     for row in tqdm(cursor, total=expected, desc="Loading parent-child edges"):
         src = row[SOURCE_NODE_ID_COL]
         tgt = row[TARGET_NODE_ID_COL]
         declared = row[DECLARED_BY_COL]
+        
         # Skip invalid
         if not src or not tgt:
+            skipped_count += 1
             continue
+        
+        # Determine node types using cache first for performance
+        src_published, src_phantom = False, False
+        tgt_published, tgt_phantom = False, False
+        
+        if src in activity_type_cache:
+            src_published, src_phantom = activity_type_cache[src]
+        else:
+            src_published, src_phantom = check_node_exists(pg_conn, src)
+            activity_type_cache[src] = (src_published, src_phantom)
+        
+        if tgt in activity_type_cache:
+            tgt_published, tgt_phantom = activity_type_cache[tgt]
+        else:
+            tgt_published, tgt_phantom = check_node_exists(pg_conn, tgt)
+            activity_type_cache[tgt] = (tgt_published, tgt_phantom)
+        
+        # Decide which Cypher query to use based on node types
+        if not (src_published or src_phantom) or not (tgt_published or tgt_phantom):
+            skipped_count += 1
+            continue
+        
+        # Create appropriate Cypher query based on node types
+        src_label = ACTIVITY_LABEL if src_published else PHANTOM_ACTIVITY_LABEL
+        tgt_label = ACTIVITY_LABEL if tgt_published else PHANTOM_ACTIVITY_LABEL
+        
+        src_prop = "iatiidentifier" if src_published else "phantom_activity_identifier"
+        tgt_prop = "iatiidentifier" if tgt_published else "phantom_activity_identifier"
+        
+        if src_published:
+            published_count += 1
+        else:
+            phantom_count += 1
+            
+        if tgt_published:
+            published_count += 1
+        else:
+            phantom_count += 1
+        
+        cypher = f"""
+        MATCH (src:{src_label} {{{src_prop}: $src}})
+        MATCH (tgt:{tgt_label} {{{tgt_prop}: $tgt}})
+        MERGE (src)-[rel:{NEO4J_EDGE_TYPE}]->(tgt)
+        SET rel.{DECLARED_BY_COL} = $declared
+        """
+        
         try:
             with neo4j_driver.session() as session:
                 session.run(cypher, src=src, tgt=tgt, declared=declared)
@@ -122,7 +201,11 @@ def load_hierarchy_edges(pg_conn, neo4j_driver, batch_size):
             continue
 
     after = get_neo4j_edge_count(neo4j_driver, NEO4J_EDGE_TYPE)
-    print(f"--- Finished loading parent-child edges. Merged: {merged} (before: {before}, after: {after}) ---")
+    print(f"--- Finished loading parent-child edges ---")
+    print(f"Merged: {merged} edges (before: {before}, after: {after})")
+    print(f"Published nodes referenced: {published_count}")
+    print(f"Phantom nodes referenced: {phantom_count}")
+    print(f"Skipped relationships: {skipped_count}")
 
 def main():
     pg_conn = get_postgres_connection()
