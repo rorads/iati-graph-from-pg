@@ -30,7 +30,7 @@ This project sets up a PostgreSQL and Neo4j database using Docker Compose and pr
     ```bash
     make download-dump
     ```
-    This will download the `iati.dump.gz` file into the `data/pg_dump/` directory (which is ignored by Git).
+    This will download the `iati.dump.gz` file into the `data/pg_dump/` directory (which is ignored by Git). It uses the `-N` flag to only download if the remote file is newer or the local file is missing.
 
 5.  **Start the databases:**
     ```bash
@@ -45,7 +45,7 @@ This project sets up a PostgreSQL and Neo4j database using Docker Compose and pr
 
 ### Graph Loading Process
 
-The project implements a sequential ETL pipeline that loads data from PostgreSQL into Neo4j in the following order:
+The project implements a sequential ETL pipeline that loads data from PostgreSQL into Neo4j. The primary script orchestrates loading in the following order:
 
 1. **Nodes:**
    * Published Activities (aid projects that appear in IATI data)
@@ -57,33 +57,47 @@ The project implements a sequential ETL pipeline that loads data from PostgreSQL
    * Participation Links (connects organizations to activities)
    * Financial Transactions (monetary flows between organizations and activities)
    * Funds Links (direct activity-to-activity financial relationships)
+   * Hierarchy Links (`:PARENT_OF` relationships between activities)
 
-To load the complete graph:
+To build the underlying dbt models and then load the complete graph into Neo4j (running from the project root):
+```bash
+make dbt-build
+make load_graph
+```
+**Note:** Graph loading scripts (`load_*.py`) and the main `load_graph.py` script are run from within the `graph/` directory by the `make` targets.
+
+You can also run individual loading scripts *from within the `graph/` directory* if needed, after running `make dbt-build`:
 ```bash
 cd graph
-python load_graph_sequential.py
+uv run python load_published_activities.py
+uv run python load_funds_edges.py
+uv run python load_hierarchy_edges.py
+# etc.
 ```
 
-You can also run individual loading scripts if needed:
+To completely wipe the Neo4j database (useful for reloading):
 ```bash
-python load_published_activities.py
-python load_funds_edges.py
-# etc.
+make wipe-neo4j
 ```
 
 ### SQL Transformations with dbt
 
-The project uses dbt (data build tool) for SQL transformations:
+The project uses dbt (data build tool) for SQL transformations within the `graph/` directory.
+
 ```bash
-# Load environment variables from .env into your current shell
+# Load environment variables from .env into your current shell (run from project root)
 source .env 
 
-# Install dependencies (needed after changes to packages in dbt_project.yml)
+# Install/update dbt dependencies (run from graph/ directory)
+cd graph
 uv run dbt deps
 
-# Run dbt models
-uv run dbt run
+# Build dbt models (run from project root)
+make dbt-build
 
+# Alternatively, run dbt commands manually from the graph/ directory:
+cd graph
+uv run dbt run
 # Run specific model
 uv run dbt run --select model_name
 ```
@@ -93,6 +107,17 @@ uv run dbt run --select model_name
 *   **Stop databases:** `make docker-down`
 *   **View logs:** `docker-compose logs -f`
 *   **List Makefile targets:** `make help`
+
+### Other Useful Makefile Targets
+
+The `Makefile` provides several convenient targets (run from the project root):
+
+*   `make setup-env`: Creates `.env` from `.env.example` if it doesn't exist.
+*   `make download-dump`: Downloads the IATI Postgres dump.
+*   `make dbt-build`: Runs `dbt build` within the `graph/` directory.
+*   `make load_graph`: Runs the main Python graph loading script (`graph/load_graph.py`).
+*   `make wipe-neo4j`: Runs the script to clear all data from the Neo4j database (`graph/wipe_neo4j.py`).
+*   `make clone-schemas`: Clones the official IATI-Schemas repository into `additional-resources/IATI-Schemas`. This is not required for the core functionality but can be useful for development or exploration, potentially for agentic development tasks needing schema details.
 
 ## Graph Model
 
@@ -108,6 +133,7 @@ The Neo4j graph consists of:
   * `:PARTICIPATES_IN` - Connects organizations to activities
   * `:FINANCIAL_TRANSACTION` - Represents financial flows between organizations and activities
   * `:FUNDS` - Direct activity-to-activity funding relationship (aggregated from transactions)
+  * `:PARENT_OF` - Represents the hierarchical relationship between activities
 
 ## Project Structure
 
@@ -116,5 +142,12 @@ The Neo4j graph consists of:
 * `data/pg_dump/` - Directory for storing the IATI database dump
 * `graph/` - DBT project and Neo4j loading scripts
   * `models/` - DBT models defining SQL transformations
+  * `utils/` - Utility scripts (e.g., Neo4j interaction)
   * `load_*.py` - Individual ETL scripts for loading specific nodes/edges
-  * `load_graph_sequential.py` - Master script that runs all ETL steps in sequence
+  * `load_graph.py` - Master script that runs all ETL steps in sequence
+  * `wipe_neo4j.py` - Script to wipe the Neo4j database
+* `additional-resources/` - Optional directory for supplementary resources (e.g., IATI Schemas cloned via `make clone-schemas`)
+* `.env` - Local environment configuration (created via `make setup-env`, ignored by Git)
+* `.env.example` - Example environment file
+* `Makefile` - Defines common tasks and commands
+* `uv.lock`, `pyproject.toml` - Python dependency management files
