@@ -21,6 +21,9 @@ help:
 	@echo "		   Remember to update the .env file with your own values."
 	@echo "  download-dump    Download the IATI Postgres dump file (-N flag used)."
 	@echo "  clone-schemas    Clone the IATI-Schemas repository into additional-resource/."
+	@echo "  dbt-build        Run dbt build in graph directory."
+	@echo "  load_graph       Load the graph to neo4j from the graph directory. (requires dbt-build first)"
+	@echo "  wipe-neo4j       Wipe the neo4j database and start fresh."
 	@echo ""
 	@echo "Docker Compose:"
 	@echo "  docker-up        Start services defined in docker-compose.yml in detached mode."
@@ -61,3 +64,17 @@ docker-down:
 	@docker compose down
 	@echo "Docker containers stopped."
 
+dbt-build:
+	@echo "Running dbt build in graph directory..."
+	@cd graph && uv run dbt build
+	@echo "dbt build completed."
+
+load_graph:
+	@echo "Loading graph to neo4j..."
+	@cd graph && uv run python load_graph.py
+	@echo "Graph loaded to neo4j."
+
+wipe-neo4j:
+	@echo "Wiping neo4j database..."
+	@cd graph && uv run python wipe_neo4j.py
+	@echo "Neo4j database wiped."
