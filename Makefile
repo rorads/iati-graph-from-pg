@@ -71,7 +71,7 @@ dbt-build:
 
 load_graph:
 	@echo "Loading graph to neo4j..."
-	@cd $(DBT_PROJECT_DIR) && uv run python load_graph.py
+	@cd $(DBT_PROJECT_DIR) && uv run python load_graph_sequential.py
 	@echo "Graph loaded to neo4j."
 
 wipe-neo4j:

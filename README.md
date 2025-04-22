@@ -144,7 +144,7 @@ The Neo4j graph consists of:
   * `models/` - DBT models defining SQL transformations
   * `utils/` - Utility scripts (e.g., Neo4j interaction)
   * `load_*.py` - Individual ETL scripts for loading specific nodes/edges
-  * `load_graph.py` - Master script that runs all ETL steps in sequence
+  * `load_graph_sequential.py` - Master script that runs all ETL steps in sequence
   * `wipe_neo4j.py` - Script to wipe the Neo4j database
 * `additional-resources/` - Optional directory for supplementary resources (e.g., IATI Schemas cloned via `make clone-schemas`)
 * `.env` - Local environment configuration (created via `make setup-env`, ignored by Git)
