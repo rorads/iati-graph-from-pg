@@ -48,7 +48,7 @@ EDGE_PROPERTY_COLUMNS = [
 DEFAULT_BATCH_SIZE = 1000
 
 # Log file for skipped edge details
-LOG_DIR = "graph/logs" # Define log directory
+LOG_DIR = "logs" # Define log directory relative to script CWD (which is 'graph')
 SKIPPED_DETAILS_LOG_FILENAME = os.path.join(LOG_DIR, "participation_edges_skipped_details.log")
 SUMMARY_LOG_FILENAME = os.path.join(LOG_DIR, "participation_edges_skipped_summary.log") # Add summary log definition
 
@@ -223,9 +223,18 @@ def load_participation_edges(pg_conn, neo4j_driver, batch_size):
     """Loads participation edges from PostgreSQL to Neo4j."""
     print(f"--- Loading Edges: {DBT_TARGET_SCHEMA}.{SOURCE_TABLE} -> :{NEO4J_EDGE_TYPE} ---")
 
+    # Ensure the log directory exists
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        print(f"Ensured log directory exists: {os.path.abspath(LOG_DIR)}")
+    except OSError as e:
+        print(f"Error creating log directory '{LOG_DIR}': {e}", file=sys.stderr)
+        # Depending on requirements, you might want to exit or continue without logging
+        # return False, 0, 0, 0 # Example: exit if log dir creation fails
+
     summary_log_filename = SUMMARY_LOG_FILENAME
     # Define detail log filename using constant
-    detail_log_filename = SKIPPED_DETAILS_LOG_FILENAME 
+    detail_log_filename = SKIPPED_DETAILS_LOG_FILENAME
 
     # Add this near the beginning with pg_conn parameter
     check_node_existence(neo4j_driver, pg_conn)

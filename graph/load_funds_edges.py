@@ -50,7 +50,7 @@ EDGE_PROPERTY_COLUMNS = [
 DEFAULT_BATCH_SIZE = 500
 
 # Log file for skipped edge details
-LOG_DIR = "graph/logs" # Define log directory
+LOG_DIR = "logs" # Define log directory
 SKIPPED_DETAILS_LOG_FILENAME = os.path.join(LOG_DIR, "funds_edges_skipped_details.log")
 SUMMARY_LOG_FILENAME = os.path.join(LOG_DIR, "funds_edges_skipped_summary.log")
 
