@@ -66,15 +66,15 @@ docker-down:
 
 dbt-build:
 	@echo "Running dbt build in graph directory..."
-	@cd graph && uv run dbt build
+	@cd $(DBT_PROJECT_DIR) && uv run dbt build
 	@echo "dbt build completed."
 
 load_graph:
 	@echo "Loading graph to neo4j..."
-	@cd graph && uv run python load_graph.py
+	@cd $(DBT_PROJECT_DIR) && uv run python load_graph.py
 	@echo "Graph loaded to neo4j."
 
 wipe-neo4j:
 	@echo "Wiping neo4j database..."
-	@cd graph && uv run python wipe_neo4j.py
+	@cd $(DBT_PROJECT_DIR) && uv run python wipe_neo4j.py
 	@echo "Neo4j database wiped."
