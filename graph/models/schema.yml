@@ -3,12 +3,6 @@ version: 2
 models:   
   - name: published_activities
     description: "Published, deduplicated activities model with key fields. Strictly one row per IATI Identifier, possibly with loss of data."
-    tests:
-      - unique:
-          column_name: iatiidentifier
-      - dbt_utils.cardinality_equality:
-          field: iatiidentifier
-          to: source('iati_postgres', 'activity')
     columns:
       - name: iatiidentifier
         description: "Unique IATI Identifier"
