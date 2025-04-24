@@ -6,11 +6,15 @@ import os
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 # List of scripts to run in order
+# Node loading scripts first, then edge loading scripts
 scripts = [
+    # Node Loading
     "load_published_activities.py",
     "load_published_organisations.py",
     "load_phantom_activities.py",
     "load_phantom_organisations.py",
+    # Edge Loading
+    "load_publication_edges.py",
     "load_hierarchy_edges.py",
     "load_participation_edges.py",
     "load_funds_edges.py",
@@ -31,21 +35,29 @@ for script in scripts:
         # Pass current environment variables
         result = subprocess.run(
             [sys.executable, script_path],
-            check=True,
-            stdout=subprocess.PIPE,
-            text=True,
+            check=True,            # Raise exception on non-zero exit code
+            capture_output=True,   # Capture stdout/stderr
+            text=True,             # Decode output as text
             env=os.environ,
             cwd=script_dir # Ensure script runs with its directory as CWD
         )
         print(f"Output from {script}:")
-        print(result.stdout)
+        # Print stdout only if it's not empty
+        if result.stdout:
+            print(result.stdout)
+        # Print stderr only if it's not empty (useful for warnings/progress from tqdm)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr) # Print to stderr to keep it separate
         print(f"--- Finished {script} ---")
 
     except subprocess.CalledProcessError as e:
         print(f"Error running {script}:", file=sys.stderr)
         print(f"Return code: {e.returncode}", file=sys.stderr)
+        # Print captured stdout and stderr on error for debugging
         if e.stdout:
-            print(f"Output: {e.stdout}", file=sys.stderr)
+            print(f"Captured stdout:\n{e.stdout}", file=sys.stderr)
+        if e.stderr:
+            print(f"Captured stderr:\n{e.stderr}", file=sys.stderr)
         print("Stopping execution due to error.", file=sys.stderr)
         sys.exit(1) # Exit if any script fails
     except Exception as e:
