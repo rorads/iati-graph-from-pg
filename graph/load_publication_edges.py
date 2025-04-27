@@ -21,9 +21,10 @@ LOG_FILE = os.path.join(LOG_DIR, "summary_publication_edges.log")
 def create_publishes_relationships(pg_conn, neo4j_driver, batch_size=BATCH_SIZE, limit=None, debug=False):
     """
     Create :PUBLISHES relationships from organisations to activities based on their IDs.
-    Uses a two-step matching process:
+    Uses a three-step matching process:
     1. Primary match: activity.reportingorg_ref = organisation.organisationidentifier
     2. Fallback match: activity.reportingorg_ref = organisation.reportingorg_ref
+    3. Phantom match: activity.reportingorg_ref = phantom_organisation.reference
     """
     print(f"\n--- Creating {RELATIONSHIP_TYPE} relationships ---")
     
@@ -64,6 +65,46 @@ def create_publishes_relationships(pg_conn, neo4j_driver, batch_size=BATCH_SIZE,
         fallback_count = cursor.fetchone()[0]
         print(f"Found {fallback_count:,} potential fallback relationships")
     
+    # Create a temporary table for all potential phantom matches
+    print("\n--- Preparing phantom matches ---")
+    with pg_conn.cursor() as cursor:
+        # Create a temp table with all activities that need phantom matching
+        print("Creating temporary table with potential phantom matches...")
+        prep_query = """
+        CREATE TEMP TABLE phantom_matches AS
+        SELECT 
+            a.iatiidentifier as activity_id,
+            a.reportingorg_ref as org_ref,
+            p.reference as phantom_ref,
+            p.distinct_narratives as org_names
+        FROM 
+            iati_graph.published_activities a
+        JOIN 
+            iati_graph.phantom_organisations p ON a.reportingorg_ref = p.reference
+        WHERE 
+            a.reportingorg_ref IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1 
+                FROM iati_graph.published_organisations o 
+                WHERE a.reportingorg_ref = o.organisationidentifier
+            )
+            AND NOT EXISTS (
+                SELECT 1 
+                FROM iati_graph.published_organisations o 
+                WHERE a.reportingorg_ref = o.reportingorg_ref
+            );
+        
+        CREATE INDEX ON phantom_matches(activity_id);
+        CREATE INDEX ON phantom_matches(phantom_ref);
+        """
+        cursor.execute(prep_query)
+        pg_conn.commit()
+        
+        # Get count of phantom activities
+        cursor.execute("SELECT COUNT(*) FROM phantom_matches")
+        phantom_count = cursor.fetchone()[0]
+        print(f"Found {phantom_count:,} potential phantom relationships")
+    
     # STEP 1: Primary matching using organisationidentifier
     primary_created = process_relationships(
         pg_conn, 
@@ -83,25 +124,37 @@ def create_publishes_relationships(pg_conn, neo4j_driver, batch_size=BATCH_SIZE,
         debug=debug
     )
     
+    # STEP 3: Phantom matching using phantom organisations for remaining unmatched activities
+    phantom_created = process_phantom_relationships(
+        pg_conn, 
+        neo4j_driver, 
+        batch_size=batch_size,
+        limit=limit,
+        debug=debug
+    )
+    
     # Clean up
     with pg_conn.cursor() as cursor:
         cursor.execute("DROP TABLE IF EXISTS fallback_matches")
+        cursor.execute("DROP TABLE IF EXISTS phantom_matches")
         pg_conn.commit()
     
     # Print final summary
     print(f"\n--- Final {RELATIONSHIP_TYPE} Creation Summary ---")
     print(f"Primary matches created: {primary_created:,}")
     print(f"Fallback matches created: {fallback_created:,}")
-    print(f"Total relationships created: {primary_created + fallback_created:,}")
+    print(f"Phantom matches created: {phantom_created:,}")
+    print(f"Total relationships created: {primary_created + fallback_created + phantom_created:,}")
     
     # Log final summary to file
     with open(LOG_FILE, 'a') as f:
         f.write(f"\n--- Final {RELATIONSHIP_TYPE} Creation Summary ---\n")
         f.write(f"Primary matches created: {primary_created:,}\n")
         f.write(f"Fallback matches created: {fallback_created:,}\n")
-        f.write(f"Total relationships created: {primary_created + fallback_created:,}\n")
+        f.write(f"Phantom matches created: {phantom_created:,}\n")
+        f.write(f"Total relationships created: {primary_created + fallback_created + phantom_created:,}\n")
     
-    return True, primary_created + fallback_created
+    return True, primary_created + fallback_created + phantom_created
 
 def process_relationships(pg_conn, neo4j_driver, match_type, batch_size=BATCH_SIZE, limit=None, debug=False):
     """
@@ -357,6 +410,143 @@ def process_fallback_relationships(pg_conn, neo4j_driver, batch_size=BATCH_SIZE,
     # Log summary to file
     with open(LOG_FILE, 'a') as f:
         f.write(f"\n--- FALLBACK {RELATIONSHIP_TYPE} Creation Summary ---\n")
+        f.write(f"Total processed: {processed_count:,}\n")
+        f.write(f"Relationships created: {created_count:,}\n")
+        f.write(f"Skipped: {skipped_count:,}\n")
+        f.write(f"Process completed in {elapsed_time:.2f} seconds\n")
+        f.write(f"Processing rate: {rate:.1f} rows/second\n")
+    
+    return created_count
+
+def process_phantom_relationships(pg_conn, neo4j_driver, batch_size=BATCH_SIZE, limit=None, debug=False):
+    """
+    Process phantom relationships using the pre-prepared phantom_matches table
+    """
+    print(f"\n--- Processing PHANTOM matches (reportingorg_ref → phantom organisation) ---")
+    
+    # SQL query to get data from the temporary table
+    sql_query = """
+    SELECT 
+        activity_id,
+        org_ref,
+        phantom_ref,
+        org_names
+    FROM 
+        phantom_matches
+    """
+    
+    # Cypher query for phantom matching - dynamically create phantom organisations
+    cypher_query = f"""
+    UNWIND $batch as row
+    
+    MERGE (org:PhantomOrganisation {{reference: row.phantom_ref}})
+    ON CREATE SET 
+        org.names = row.org_names,
+        org.created_at = timestamp()
+    
+    WITH row, org
+    
+    MATCH (activity:PublishedActivity {{iatiidentifier: row.activity_id}})
+    
+    MERGE (org)-[r:{RELATIONSHIP_TYPE}]->(activity)
+    SET r.match_method = 'phantom'
+    
+    RETURN count(*) as count
+    """
+    
+    # Add a LIMIT clause if requested
+    if limit:
+        sql_query += f" LIMIT {limit}"
+        print(f"Testing mode: Processing only {limit} phantom relationships")
+    
+    # Get count of phantom relationships
+    count_query = "SELECT COUNT(*) FROM phantom_matches"
+    if limit:
+        count = min(limit, get_pg_count(pg_conn, count_query))
+    else:
+        count = get_pg_count(pg_conn, count_query)
+    
+    print(f"Processing {count:,} phantom relationships")
+    
+    if count == 0:
+        return 0
+    
+    # Use a larger batch size for better performance
+    phantom_batch_size = batch_size * 5
+    
+    # Process in batches
+    created_count = 0
+    skipped_count = 0
+    processed_count = 0
+    
+    start_time = time.time()
+    
+    try:
+        with pg_conn.cursor(name='phantom_cursor', cursor_factory=psycopg2.extras.DictCursor) as cursor:
+            cursor.itersize = phantom_batch_size
+            cursor.execute(sql_query)
+            
+            with tqdm(total=count, desc=f"Creating phantom :{RELATIONSHIP_TYPE}", unit="rels") as pbar:
+                while True:
+                    batch_data = cursor.fetchmany(phantom_batch_size)
+                    if not batch_data:
+                        break
+                    
+                    # Prepare batch for Neo4j
+                    batch = []
+                    for row in batch_data:
+                        batch.append({
+                            'activity_id': row['activity_id'], 
+                            'org_ref': row['org_ref'],
+                            'phantom_ref': row['phantom_ref'],
+                            'org_names': row['org_names']
+                        })
+                    
+                    batch_size_actual = len(batch)
+                    if batch_size_actual == 0:
+                        continue
+                    
+                    # Process batch in Neo4j
+                    try:
+                        with neo4j_driver.session() as session:
+                            result = session.run(cypher_query, batch=batch).single()
+                            created = result['count'] if result else 0
+                            
+                            created_count += created
+                            processed_count += batch_size_actual
+                            skipped_count += (batch_size_actual - created)
+                            
+                    except Exception as e:
+                        print(f"\nError processing phantom batch: {e}")
+                        with open(LOG_FILE, 'a') as f:
+                            f.write(f"Error processing phantom batch: {e}\n")
+                            if debug:
+                                f.write(f"Problematic batch (sample): {batch[:5]}\n")
+                        
+                        # Skip this batch and continue
+                        skipped_count += batch_size_actual
+                    
+                    # Update progress
+                    pbar.update(batch_size_actual)
+    
+    except Exception as e:
+        print(f"Error during phantom processing: {e}")
+        return created_count
+    
+    # Print summary
+    elapsed_time = time.time() - start_time
+    rate = processed_count / elapsed_time if elapsed_time > 0 else 0
+    
+    print(f"\n--- PHANTOM {RELATIONSHIP_TYPE} Creation Summary ---")
+    print(f"Total processed: {processed_count:,}")
+    print(f"Relationships created: {created_count:,}")
+    print(f"Skipped: {skipped_count:,}")
+    print(f"Process completed in {elapsed_time:.2f} seconds")
+    print(f"Processing rate: {rate:.1f} rows/second")
+    
+    # Log summary to file
+    with open(LOG_FILE, 'a') as f:
+        f.write(f"\n--- PHANTOM {RELATIONSHIP_TYPE} Creation Summary ---\n")
         f.write(f"Total processed: {processed_count:,}\n")
         f.write(f"Relationships created: {created_count:,}\n")
         f.write(f"Skipped: {skipped_count:,}\n")
