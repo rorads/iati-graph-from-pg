@@ -109,6 +109,8 @@ models:
         tests: [not_null]
       - name: role_name
         description: "The human-readable name of the organisation's role."
+      - name: related_activity_id
+        description: "The related activity identifier from the source record."
 
   - name: financial_links
     description: "Represents aggregated financial flows between organisations and activities for specific transaction types, standardized to USD."

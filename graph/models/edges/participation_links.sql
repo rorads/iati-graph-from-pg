@@ -11,7 +11,8 @@ SELECT DISTINCT
     po.iatiidentifier AS activity_id, -- The activity identifier
     po.ref AS organisation_id,        -- The participating organisation identifier
     po.role AS role_code,               -- The role code (e.g., '1' for Funding)
-    po.rolename AS role_name            -- The human-readable role name
+    po.rolename AS role_name,            -- The human-readable role name
+    po.activityid AS related_activity_id -- The related activity identifier
 FROM 
     {{ source('iati_postgres', 'participatingorg') }} po
 WHERE 
