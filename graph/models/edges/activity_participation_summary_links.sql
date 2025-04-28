@@ -31,4 +31,4 @@ SELECT
     role_codes,
     role_names
 FROM aggregated_links
-ORDER BY source_activity_id, target_activity_id; 
+ORDER BY source_activity_id, target_activity_id
