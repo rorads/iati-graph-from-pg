@@ -182,3 +182,19 @@ models:
         description: "The type of relationship: 'PARENT_OF' or 'SIBLING_OF'."
       - name: declared_by
         description: "Array of activity identifiers that declared this relationship."
+
+  - name: activity_participation_summary_links
+    description: "Summarises all declared connections between distinct activity_id and related_activity_id pairs, aggregating all role codes and names into arrays. Each row uniquely describes the relationship from one activity's perspective."
+    columns:
+      - name: source_activity_id
+        description: "The IATI identifier of the source activity. Each unique value appears at most once as a source."
+        tests: [not_null]
+      - name: target_activity_id
+        description: "The IATI identifier of the related (target) activity. Each unique value appears at most once as a target."
+        tests: [not_null]
+      - name: role_codes
+        description: "Array of all unique role codes declared for this activity-to-activity relationship."
+        tests: [not_null]
+      - name: role_names
+        description: "Array of all unique role names corresponding to the role codes for this relationship."
+        tests: [not_null]
