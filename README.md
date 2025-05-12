@@ -2,6 +2,8 @@
 
 This project sets up a PostgreSQL and Neo4j database using Docker Compose and processes IATI (International Aid Transparency Initiative) data into a graph database for relational analysis.
 
+![large fcdo participation network](./docs/graph.svg)
+
 ## Prerequisites
 
 *   Docker and Docker Compose
