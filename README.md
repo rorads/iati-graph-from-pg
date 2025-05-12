@@ -151,3 +151,75 @@ The Neo4j graph consists of:
 * `.env.example` - Example environment file
 * `Makefile` - Defines common tasks and commands
 * `uv.lock`, `pyproject.toml` - Python dependency management files
+
+## Development & Analysis
+
+This project has used Cursor extensively, with a mix of models (generally with 'thinking' mode enforced).
+
+In particular, the use of MCP tools which allow models to interrogate the psql and neo4j databases directly to debug and test, help with design, and refine the use via Cypher queries.
+
+Look at [this json file](./docs/cursor-mcp.json) and copy it's content into `cursor settings/mcp` once you have the local docker services running to use them in Cursor. This file should also be compatible with Claude Code.
+
+Example:
+
+> Use the iati neo4j database to help me understand which organisations work downstream from both the US government and the UK government the most. I'm looking for the ones which have the highest joint exposure to funding originating from both. You'll need to look at the schema first, and then examine organisations first to create a list / pattern to select the right organisations to represent the government institutions, and then you'll need to use your knowledge of graph databasese to develop an approach to find the downstream organisations (and those which are downstream of those via funding or participation. Don't just return me a query - use neo4j to write me a small report outlining your approach and findings.
+> 
+> Be careful not to use queries which will run indefinitely or max out the server's resources (like uncaped all-graph traversals etc.)
+
+Output (just final report, for full transcript see [this markdown file](./docs/autonomous_analysis_example.md)): 
+
+> Based on our analysis, I'll now compile a report on organizations with the highest joint exposure to funding from both US and UK governments.
+> 
+> # Organizations with Highest Joint Exposure to US and UK Government Funding
+> 
+> ## Methodology
+> 
+> To identify organizations with significant downstream exposure to both US and UK government funding, I analyzed the IATI graph database with the following approach:
+> 
+> 1. Identified all organizations with the prefix "US-GOV" for US government departments and "GB-GOV" for UK government departments
+> 2. Found organizations that participate in activities funded by both US and UK government entities
+> 3. Calculated a "joint exposure" metric as the product of US-funded activities and UK-funded activities
+> 4. Examined detailed participation patterns for top organizations
+> 
+> ## Key Findings
+> 
+> ### Top Organizations by Joint Exposure
+> 
+> The following organizations demonstrate the highest levels of joint participation in activities funded by both US and UK government entities:
+> 
+> 1. **World Health Organization (WHO)** - Participates in 2,328 US-funded activities and 1,544 UK-funded activities
+> 2. **Sweden** - Participates in 1,646 US-funded activities and 1,897 UK-funded activities
+> 3. **German Federal Ministry for Economic Cooperation and Development** - Participates in 1,293 US-funded activities and 1,656 UK-funded activities
+> 4. **United Nations Development Programme** - Participates in 1,010 US-funded activities and 1,397 UK-funded activities
+> 5. **Global Affairs Canada** - Participates in 1,606 US-funded activities and 647 UK-funded activities
+> 
+> ### Detailed Analysis: World Health Organization
+> 
+> The WHO shows the highest joint exposure to both countries' funding:
+> 
+> - **US Government Participation:**
+>   - Primary source: U.S. Agency for International Development (USAID) - 2,328 activities
+>   - Secondary source: U.S. Department of State - 27 activities
+> 
+> - **UK Government Participation:**
+>   - Primary source: UK Foreign, Commonwealth and Development Office - 1,520 activities
+>   - Secondary source: UK Department of Health and Social Care - 21 activities
+>   - Tertiary source: UK Home Office - 9 activities
+> 
+> This suggests the WHO is a critical implementing partner for both countries' international development and health security objectives.
+> 
+> ## Observations
+> 
+> 1. **Multilateral Organizations Dominate**: UN agencies (WHO, UNDP, WFP, UNAIDS) feature prominently in joint funding, suggesting they serve as preferred vehicles for both countries' international development agendas.
+> 
+> 2. **Peer Government Agencies**: National development agencies from other countries (Sweden, Germany, Canada, Australia) also feature in the top list, indicating significant triangular cooperation between the US, UK, and other donor countries.
+> 
+> 3. **Humanitarian Focus**: Organizations with humanitarian mandates (UN OCHA, WFP, IOM) feature prominently, suggesting this as a key area of joint US-UK funding priority.
+> 
+> 4. **Limited Private Sector Representation**: Only one private foundation (Gates Foundation) appears in the top 15, suggesting that bilateral/multilateral channels remain the dominant vehicles for US-UK joint funding.
+> 
+> ## Conclusion
+> 
+> This analysis reveals that the international aid ecosystem has several key organizations that are heavily exposed to both US and UK government funding. The prevalence of multilateral organizations at the top of the list suggests these entities serve as important channels for coordinating bilateral priorities from both donor countries.
+> 
+> These findings could help stakeholders understand which organizations would be most affected by policy shifts in either the US or UK development funding landscapes, and identify the most influential implementing partners for both countries' international development objectives.
