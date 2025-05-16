@@ -162,11 +162,13 @@ In particular, the use of MCP tools which allow models to interrogate the psql a
 
 Look at [this json file](./docs/cursor-mcp.json) and copy it's content into `cursor settings/mcp` once you have the local docker services running to use them in Cursor. This file should also be compatible with Claude Code.
 
+## License
+
+This project is licensed under the terms of the [LICENSE](./LICENSE) file.
+
 Example:
 
 > Use the iati neo4j database to help me understand which organisations work downstream from both the US government and the UK government the most. I'm looking for the ones which have the highest joint exposure to funding originating from both. You'll need to look at the schema first, and then examine organisations first to create a list / pattern to select the right organisations to represent the government institutions, and then you'll need to use your knowledge of graph databasese to develop an approach to find the downstream organisations (and those which are downstream of those via funding or participation. Don't just return me a query - use neo4j to write me a small report outlining your approach and findings.
-> 
-> Be careful not to use queries which will run indefinitely or max out the server's resources (like uncaped all-graph traversals etc.)
 
 Output (just final report, for full transcript see [this markdown file](./docs/autonomous_analysis_example.md)): 
 
