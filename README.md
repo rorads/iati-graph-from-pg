@@ -19,7 +19,6 @@ flowchart LR
         user([User]) -.-> make[Makefile Commands]
     end
 
-    // Central definition of database components
     subgraph Databases["Databases (Docker Services)"]
         direction TB 
         postgres_container[PostgreSQL Container]
