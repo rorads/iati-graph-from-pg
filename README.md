@@ -10,6 +10,68 @@ This project sets up a PostgreSQL and Neo4j database using Docker Compose and pr
 *   Make
 *   [uv](https://github.com/astral-sh/uv) (for Python package management)
 
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph UserInteraction["User / Developer"]
+        direction LR
+        user([User]) -.-> make[Makefile Commands]
+    end
+
+    // Central definition of database components
+    subgraph Databases["Databases (Docker Services)"]
+        direction TB 
+        postgres_container[PostgreSQL Container]
+        neo4j_container[Neo4j Container]
+        iati_db_node[("iati DB (Raw Data + Graph Preprocessing)")] 
+
+        postgres_container -. "hosts" .-> iati_db_node 
+    end
+    
+    subgraph DataIngestion["Data Ingestion & Preparation"]
+        direction TB
+        iati_dump[("iati.dump.gz (External Data Source)")] 
+        pg_dump_dir["data/pg_dump/"] 
+        dbt_process["dbt build (in graph/)"] 
+
+        make -- "make download-dump" --> iati_dump
+        iati_dump --> pg_dump_dir
+        
+        make -- "make docker-up (starts services)" --> Databases 
+
+        pg_dump_dir -.->|Mounted Volume| postgres_container
+        postgres_container -- "init-db.sh populates" --> iati_db_node 
+        
+        make -- "make dbt-build" --> dbt_process
+        dbt_process -- "SQL Transforms data in" --> iati_db_node
+    end
+
+    subgraph GraphLoading["Graph Loading"]
+        direction TB
+        python_scripts["Python Scripts (graph/load_graph_sequential.py)"] 
+        make -- "make load-graph" --> python_scripts
+        python_scripts -- "Reads from" --> iati_db_node
+        python_scripts -- "Writes to" --> neo4j_container
+    end
+    
+    subgraph UserAccess["User Access"]
+        direction LR
+        user_psql([User via psql/client]) -.-> postgres_container
+        user_neo4j_browser([User via Neo4j Browser]) -.-> neo4j_container
+    end
+
+    user --> make
+
+    style iati_dump fill:#f9f,stroke:#333,stroke-width:2px
+    style pg_dump_dir fill:#lightgrey,stroke:#333,stroke-width:1px
+    style iati_db_node fill:#lightblue,stroke:#333,stroke-width:2px
+    style postgres_container fill:#add8e6,stroke:#333,stroke-width:2px
+    style neo4j_container fill:#add8e6,stroke:#333,stroke-width:2px
+    style dbt_process fill:#ffcc99,stroke:#333,stroke-width:2px
+    style python_scripts fill:#ccffcc,stroke:#333,stroke-width:2px
+```
+
 ## Setup
 
 1.  **Clone the repository (if applicable):**
@@ -154,56 +216,6 @@ The Neo4j graph consists of:
 * `Makefile` - Defines common tasks and commands
 * `uv.lock`, `pyproject.toml` - Python dependency management files
 
-## Architecture
-
-```mermaid
-flowchart TD
-    subgraph UserInteraction["User / Developer"]
-        direction LR
-        user([User]) -.-> make[Makefile Commands]
-    end
-
-    subgraph DataIngestion["Data Ingestion & Preparation"]
-        direction TB
-        make -- "make download-dump" --> iati_dump[("iati.dump.gz\n(External Data Source)")]
-        iati_dump --> pg_dump_dir["data/pg_dump/"]
-        
-        make -- "make docker-up" --> postgres_container[PostgreSQL Container]
-        pg_dump_dir -.->|Mounted Volume| postgres_container
-        postgres_container -- "init-db.sh on start" --> iati_db[("iati DB\n(Raw Data)")]
-        
-        make -- "make dbt-build" --> dbt_process["dbt build\n(in graph/)"]
-        dbt_process -- SQL Transformations --> iati_db
-    end
-
-    subgraph GraphLoading["Graph Loading"]
-        direction TB
-        make -- "make load-graph" --> python_scripts["Python Scripts\n(graph/load_graph_sequential.py)"]
-        python_scripts -- Reads Transformed Data --> iati_db
-        python_scripts -- Writes Graph Data --> neo4j_container[Neo4j Container]
-    end
-    
-    subgraph Databases["Databases (Docker Services)"]
-        direction TB
-        postgres_container --> neo4j_container
-    end
-
-    subgraph UserAccess["User Access"]
-        direction LR
-        user_psql([User via psql/client]) -.-> postgres_container
-        user_neo4j_browser([User via Neo4j Browser]) -.-> neo4j_container
-    end
-
-    user --> make
-
-    style iati_dump fill:#f9f,stroke:#333,stroke-width:2px
-    style pg_dump_dir fill:#lightgrey,stroke:#333,stroke-width:1px
-    style iati_db fill:#lightblue,stroke:#333,stroke-width:2px
-    style postgres_container fill:#add8e6,stroke:#333,stroke-width:2px
-    style neo4j_container fill:#add8e6,stroke:#333,stroke-width:2px
-    style dbt_process fill:#ffcc99,stroke:#333,stroke-width:2px
-    style python_scripts fill:#ccffcc,stroke:#333,stroke-width:2px
-```
 
 ## Development & Analysis
 
