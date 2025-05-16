@@ -154,6 +154,57 @@ The Neo4j graph consists of:
 * `Makefile` - Defines common tasks and commands
 * `uv.lock`, `pyproject.toml` - Python dependency management files
 
+## Architecture
+
+```mermaid
+flowchart TD
+    subgraph UserInteraction["User / Developer"]
+        direction LR
+        user([User]) -.-> make[Makefile Commands]
+    end
+
+    subgraph DataIngestion["Data Ingestion & Preparation"]
+        direction TB
+        make -- "make download-dump" --> iati_dump[("iati.dump.gz\n(External Data Source)")]
+        iati_dump --> pg_dump_dir["data/pg_dump/"]
+        
+        make -- "make docker-up" --> postgres_container[PostgreSQL Container]
+        pg_dump_dir -.->|Mounted Volume| postgres_container
+        postgres_container -- "init-db.sh on start" --> iati_db[("iati DB\n(Raw Data)")]
+        
+        make -- "make dbt-build" --> dbt_process["dbt build\n(in graph/)"]
+        dbt_process -- SQL Transformations --> iati_db
+    end
+
+    subgraph GraphLoading["Graph Loading"]
+        direction TB
+        make -- "make load-graph" --> python_scripts["Python Scripts\n(graph/load_graph_sequential.py)"]
+        python_scripts -- Reads Transformed Data --> iati_db
+        python_scripts -- Writes Graph Data --> neo4j_container[Neo4j Container]
+    end
+    
+    subgraph Databases["Databases (Docker Services)"]
+        direction TB
+        postgres_container --> neo4j_container
+    end
+
+    subgraph UserAccess["User Access"]
+        direction LR
+        user_psql([User via psql/client]) -.-> postgres_container
+        user_neo4j_browser([User via Neo4j Browser]) -.-> neo4j_container
+    end
+
+    user --> make
+
+    style iati_dump fill:#f9f,stroke:#333,stroke-width:2px
+    style pg_dump_dir fill:#lightgrey,stroke:#333,stroke-width:1px
+    style iati_db fill:#lightblue,stroke:#333,stroke-width:2px
+    style postgres_container fill:#add8e6,stroke:#333,stroke-width:2px
+    style neo4j_container fill:#add8e6,stroke:#333,stroke-width:2px
+    style dbt_process fill:#ffcc99,stroke:#333,stroke-width:2px
+    style python_scripts fill:#ccffcc,stroke:#333,stroke-width:2px
+```
+
 ## Development & Analysis
 
 This project has used Cursor extensively, with a mix of models (generally with 'thinking' mode enforced).
