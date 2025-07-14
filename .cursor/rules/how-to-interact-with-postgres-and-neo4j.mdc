@@ -1,8 +1,0 @@
----
-description: onsult this rule for the correct terminal commands and parameters required to query the PostgreSQL (via docker compose exec psql) and Neo4j (via curl) databases running within this project's Docker environment. It includes specific examples tailored to the project's configuration (service names, ports, common credentials).
-globs: 
-alwaysApply: false
----
- # How to Interact with PostgreSQL and Neo4j via Terminal
-
-Formerly you had to interact with these tools via command line. You now have MCP tools which you should use.

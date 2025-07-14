@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:neo4j.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "mcp__local-neo4j__local-get_neo4j_schema",
+      "mcp__local-neo4j__local-read_neo4j_cypher"
+    ],
+    "deny": []
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "neo4j",
+    "postgres",
+    "local-neo4j"
+  ]
+}
