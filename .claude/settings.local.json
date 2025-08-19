@@ -4,7 +4,9 @@
       "WebFetch(domain:neo4j.com)",
       "WebFetch(domain:docs.anthropic.com)",
       "mcp__local-neo4j__local-get_neo4j_schema",
-      "mcp__local-neo4j__local-read_neo4j_cypher"
+      "mcp__local-neo4j__local-read_neo4j_cypher",
+      "mcp__postgres__query",
+      "mcp__local-neo4j__local-write_neo4j_cypher"
     ],
     "deny": []
   },
